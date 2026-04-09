@@ -4,162 +4,181 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project: Gnomes Lab
 
-A local, lightweight **mixture-of-agents** system. Designed to run entirely on Apple Silicon with efficient GPU/CPU split. Eventual goal: a Docker image exposable as a terminal or API (similar to Claude Code).
+A local, lightweight personal assistant running entirely on Apple Silicon. The goal is a Claude Code-like experience powered by local models — interactive REPL, tool use (file ops, bash, search), agentic loop, and persistent memory.
 
-### Agent Architecture
+See `PLAN.md` for the full implementation roadmap.
+
+---
+
+## Architecture
+
+### Model roles
 
 | Role | Name | Model | Runtime |
 |------|------|-------|---------|
-| Router + Verifier | Mama Gnome | Qwen3-4B-Instruct-2507 (mxfp4) | mlx_lm → Metal/GPU |
-| Worker agents (2–3 parallel) | Small Gnome | Qwen3.5-2B | llama-cpp-python → CPU |
-| Fallback re-thinker (optional) | Big Gnome | Qwen3.5-9B (8bit) | mlx_lm → Metal/GPU |
+| Primary agent | Papa Gnome | `Qwen3.5-9B-reasoning-4bit` (local, distilled) | mlx_lm → Metal/GPU |
+| Context reducer | Mama Gnome | `Qwen3-4B-Instruct-2507-mxfp4` | mlx_lm → Metal/GPU |
 
-**Flow:**
-1. Mama Gnome routes the question → outputs JSON plan (strategy A/B/C)
-2. Small Gnomes execute sub-tasks in parallel
-3. Mama Gnome synthesizes small gnome responses (thinking mode ON) → returns final answer + confidence 0–10
-4. If confidence < 7 → Big Gnome re-evaluates
+All models run at **4-bit quantization**. Memory: ~5 GB (9B) + ~2.5 GB (4B) = ~7.5 GB total on 16 GB M2 Pro.
 
-### Compute Strategy
+**Papa Gnome (9B)** is the primary — it reads every message, drives the agent loop, decides tool calls, and generates the final answer.
 
-- **mlx_lm** handles Metal GPU ops (4B router/verifier, 9B fallback)
-- **llama-cpp-python** handles CPU ops (2B agents via GGUF)
-- Apple Silicon has **unified memory** — CPU and GPU share the same physical RAM pool; no separate VRAM
-- Keep `n_gpu_layers=0` in llama-cpp to ensure agents stay on CPU and don't compete with MLX
+**Mama Gnome (4B)** is a helper only — activated when a tool returns a large output (> ~500 tokens) to compress it before it enters the 9B's context. Never in the routing critical path.
 
-### ⚠️ Model upgrade reminder
-**Check periodically:** Has `mlx-community/Qwen3.5-4B-Instruct-*` been released on HuggingFace?
-- Collection to check: https://huggingface.co/collections/mlx-community/qwen-35
-- When available, swap `model_repo` in `gnomes_village/mama_gnome.py` — one-line change
-- Qwen3.5 Instruct would replace `Qwen3-4B-Instruct-2507-mxfp4` as the router/verifier
+### Flow
 
+```
+User message
+    └─► Papa Gnome (9B) — reads full conversation context
+            ├─ trivial? → answer directly
+            ├─ needs tools? → output tool_calls JSON → Python executes tools
+            │       └─ output > 500 tokens? → Mama Gnome (4B) compresses it
+            ├─ needs memory? → call memory_recall tool → inject relevant facts
+            └─ stream final answer to user
+```
+
+### Why not route via 4B first?
+
+The tasks worth using a local assistant for are tool-heavy and multi-step — exactly where 9B-primary wins. A 4B routing classifier adds a round-trip to every query (including complex ones that need 9B anyway) with no benefit. Simple tasks where 4B would be faster are tasks you'd handle more quickly yourself.
+
+---
+
+## Models
+
+**Primary agent (Papa Gnome):**
+- Local path: `./models/Qwen3.5-9B-reasoning-4bit`
+- Source: `Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2` converted via `conversion.py`
+- Loaded via `mlx_lm` — instruct-tuned, reasoning-distilled from Claude Opus 4.6
+- Use `tokenizer_config={"fix_mistral_regex": True}` when loading (tokenizer quirk)
+
+**Context reducer (Mama Gnome):**
+- `mlx-community/Qwen3-4B-Instruct-2507-mxfp4` — loaded via `mlx_lm`
+- Text-only, instruct-tuned, reliable JSON output
+
+**Embedding model (for semantic memory — optional):**
+- `mlx-community/Qwen3-Embedding-4B-4bit-DWQ` — already in HF cache
+- Used for Tier 2 memory search (not yet implemented)
+
+**Note on Qwen3.5 vs Qwen3:**
+- Qwen3.5 mlx-community models have vision towers → require `mlx_vlm`
+- Qwen3-Instruct models are text-only → use `mlx_lm` (better JSON, instruct-tuned)
+- The distilled 9B (`Jackrong/...`) is text-only → use `mlx_lm`
+
+---
 
 ## Files
 
 ```
 gnomes-lab/
-├── main.py                        # Entry point: loads Mama Gnome, runs a query
-├── utils.py                       # Shared helpers (partially outdated, see below)
-├── sketch.py                      # Original prototype / architecture inspiration (not imported)
-└── gnomes_village/                # Agent package
+├── main.py                        # Entry point — REPL loop (in progress)
+├── config.py                      # Config dataclass: model paths, settings
+├── conversion.py                  # Convert HF model to local MLX 4-bit
+├── test.py                        # Quick model smoke test
+├── utils.py                       # Shared helpers (partially outdated)
+├── sketch.py                      # Original prototype (not imported)
+├── PLAN.md                        # Full implementation roadmap
+└── gnomes_village/
     ├── __init__.py
-    ├── mama_gnome.py              # Router + Verifier (4B mlx_lm): summon_mana_gnome(), router(), synthesize() (TODO)
-    └── small_gnomes.py            # Small Gnomes (2B): summon_smol_gnomes(), thinking_gnome(), direct_gnome() (TODO)
+    ├── papa_gnome.py              # PRIMARY agent (9B): load, generate, tool-call loop
+    ├── mama_gnome.py              # Context reducer (4B): compress large tool output
+    ├── small_gnomes.py            # Legacy small gnome workers (2B, not in main flow)
+    ├── tools.py                   # Tool implementations: bash_exec, read_file, etc.
+    └── tool_registry.py           # Tool schemas, dispatch, format_result
+~/.gnomes/
+    ├── context.md                 # Personal always-on context (user-written)
+    ├── history.jsonl              # Conversation history (append-only log)
+    └── memory/
+        ├── INDEX.md               # One-liner per memory file (loaded at startup)
+        └── *.md                   # Agent-written memory files
 ```
 
-### Key functions
+---
 
-| File | Function | Purpose |
-|------|----------|---------|\
-| `gnomes_village/mama_gnome.py` | `summon_mana_gnome()` | Loads 4B mlx_lm model; returns `(model, tokenizer)` |
-| `gnomes_village/mama_gnome.py` | `router(model, tokenizer, user_input)` | Plans strategy A/B/C, returns JSON string |
-| `gnomes_village/mama_gnome.py` | `synthesize()` | TODO: digest small gnome responses, return final answer + confidence |
-| `gnomes_village/small_gnomes.py` | `summon_smol_gnomes()` | Loads 2B model; returns `(model, processor, config)` |
-| `gnomes_village/small_gnomes.py` | `thinking_gnome(...)` | Runs reasoning sub-task |
-| `gnomes_village/small_gnomes.py` | `direct_gnome(...)` | TODO: runs concise sub-task |
+## Config
 
-### Routing strategies (mama_gnome)
+```python
+# config.py
+from dataclasses import dataclass
 
-- **A — self-answer**: Mama Gnome answers directly (`answer` field filled, task fields null)
-- **B — decompose**: splits into `task_think` (reasoning gnome) + `task_direct` (concise gnome)
-- **C — parallel**: both small gnomes get the exact same problem independently
-
-### Mama Gnome — two modes on the same model
-
-The same loaded `(model, tokenizer)` is used for both calls:
-- **Routing**: `enable_thinking=False` → fast, structured JSON output
-- **Synthesis**: `enable_thinking=True` → thinking mode on, digests all gnome responses, produces final answer + confidence score
-
-Synthesis prompt should include: original question, routing JSON, each gnome's labeled response, then ask for final answer + confidence 0–10.
-
-Synthesis JSON schema:
-```json
-{
-  "answer": "final synthesized answer",
-  "confidence": 8,
-  "gaps": "anything gnomes missed or disagreed on, or null"
-}
+@dataclass
+class Config:
+    main_model: str = './models/Qwen3.5-9B-reasoning-4bit'   # Papa Gnome (9B)
+    small_model: str = 'mlx-community/Qwen3-4B-Instruct-2507-mxfp4'  # Mama Gnome (4B)
 ```
 
+Always use `os.path.expanduser()` when passing paths to `mlx_lm.load()`.
 
-## Models
-
-**Router/Verifier (current):**
-- `mlx-community/Qwen3-4B-Instruct-2507-mxfp4` — Qwen3 Instruct, text-only, loaded via `mlx_lm`
-
-**Small Gnomes:**
-- MLX: `mlx-community/Qwen3.5-2B-8bit` (via mlx_vlm — has vision tower)
-- GGUF (preferred for CPU): `unsloth/Qwen3.5-2B-GGUF`, recommended `Q4_K_M` (~1.28 GB)
-
-**Big Gnome (fallback):**
-- `mlx-community/Qwen3.5-9B-8bit` (via mlx_vlm — has vision tower)
-
-**Note on Qwen3.5 vs Qwen3:**
-- Qwen3.5 mlx-community models have vision towers → must use `mlx_vlm`, not `mlx_lm`
-- Qwen3-Instruct models are text-only → use `mlx_lm` (better JSON, instruct-tuned)
-- No Qwen3.5 Instruct MLX version exists yet — watch the mlx-community collection
-
+---
 
 ## Tech Stack
 
-- **mlx_lm** — used for Mama Gnome (text-only Qwen3 Instruct)
-  - `load()` returns `(model, tokenizer)` — no config needed
+- **mlx_lm** — used for both Papa and Mama Gnome
+  - `load(path, tokenizer_config={...})` returns `(model, tokenizer)`
   - `generate()` returns plain `str`
+  - `stream_generate()` returns token iterator (for streaming final answers)
   - Sampling: `make_sampler(temp, top_p, min_p, top_k)` from `mlx_lm.sample_utils`
   - Repetition: `make_logits_processors(repetition_penalty)` from `mlx_lm.sample_utils`
   - Thinking: `tokenizer.apply_chat_template(..., enable_thinking=True/False)`
-- **mlx_vlm** — used for Small Gnomes and Big Gnome (Qwen3.5 with vision towers)
-  - `load()` returns `(model, processor)`; also need `load_config()`
-  - `generate()` returns `GenerationResult` — wrap with `text()` helper from `utils.py`
-- **llama-cpp-python** — GGUF inference on CPU for Small Gnomes
-  - Keep `n_gpu_layers=0`
 
-### mlx_lm usage pattern (Mama Gnome)
+### mlx_lm load pattern
 ```python
-from mlx_lm import load, generate
+import os
+from mlx_lm import load as mlx_load, generate
 from mlx_lm.sample_utils import make_sampler, make_logits_processors
+from config import Config
 
-model, tokenizer = load('mlx-community/Qwen3-4B-Instruct-2507-mxfp4')
-
-prompt = tokenizer.apply_chat_template(
-    messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+config = Config()
+model, tokenizer = mlx_load(
+    os.path.expanduser(config.main_model),
+    tokenizer_config={"fix_mistral_regex": True},
 )
-response = generate(
-    model, tokenizer, prompt=prompt, max_tokens=1024, verbose=False,
-    sampler=make_sampler(temp=0.5, top_p=0.95, min_p=0.05, top_k=20),
-    logits_processors=make_logits_processors(repetition_penalty=1.5),
-)
-# response is a plain str
 ```
 
-### JSON parsing (main.py)
-Emergency fallback chain for mama gnome JSON output:
-1. Strip everything before/up to `</think>` token
+### Tool-call JSON schema (Papa Gnome output)
+
+Papa Gnome outputs one of two structures per turn:
+
+```json
+// Needs tools
+{"tool_calls": [{"tool": "read_file", "args": {"path": "main.py"}}], "thinking": "..."}
+
+// Final answer
+{"answer": "the response text"}
+```
+
+`enable_thinking=False` for tool-call turns (structured JSON); `enable_thinking=True` for final answer.
+
+### JSON parsing (tool-call response)
+1. Strip everything before/up to `</think>` token if present
 2. Try `raw_decode` from first `{`
-3. Fallback: extract `{...}` block, `replace('\\"', '"').replace('""', '"')`
-4. Strip leading/trailing `"` from all string values
+3. Fallback: extract `{...}` block, clean escape issues
 
+---
 
-## Agent flow detail
+## Agent Flow Detail
 
-1. **Mama Gnome routes** — `enable_thinking=False`, outputs JSON plan (strategy A/B/C)
-2. **Small Gnomes run in parallel** via `concurrent.futures.ThreadPoolExecutor` — separate instances (not thread-safe to share one)
-3. **Mama Gnome synthesizes** — `enable_thinking=True`, receives original question + routing JSON + all gnome responses labeled, outputs final answer + confidence 0–10
-4. **Big Gnome** — loaded on demand only if `confidence < 7` (saves memory)
+1. **REPL** reads user input, appends to conversation history
+2. **Papa Gnome** generates response — either `tool_calls` JSON or `answer`
+3. If `tool_calls`: Python dispatches each tool (parallel via `ThreadPoolExecutor`)
+   - If result > 500 tokens: **Mama Gnome** compresses it
+   - Compressed/raw result appended to history as `role: tool`
+   - Loop back to step 2
+4. If `answer`: stream tokens to terminal, append to history, save to `history.jsonl`
+5. If agent calls `memory_save`: write to `~/.gnomes/memory/`, update INDEX
+6. If agent calls `memory_recall`: grep memory files, inject results into context
 
-### Thinking mode
-- `enable_thinking=True/False` in `tokenizer.apply_chat_template()` — works on Qwen3 Instruct
-- For Qwen3.5 via mlx_vlm: `/no_think` suffix on user message (chat template may not support `enable_thinking`)
-- **2B model warning**: prone to infinite thinking loops — use `presence_penalty=1.5` and `temperature=1.0, top_p=0.95, top_k=20`
+Max iterations: 10. User confirmation required before destructive tool calls.
 
+---
 
 ## Environment
 
 Uses `uv` for dependency management. Python 3.13.
 
 ```bash
-uv sync            # install all dependencies
-uv add <pkg>       # add a dependency
-uv run main.py     # run via managed venv
+uv sync                                      # install all dependencies
+uv run main.py                               # run via managed venv
 source .venv/bin/activate && python main.py  # or activate directly
+python conversion.py                         # convert + quantize model to local MLX
+python test.py                               # smoke test the primary model
 ```
