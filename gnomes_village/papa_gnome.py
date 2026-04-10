@@ -4,17 +4,23 @@ from mlx_lm.sample_utils import make_sampler, make_logits_processors
 from toolz import tool_registry
 import datetime as dt
 import os
+import logging
+import transformers
+import huggingface_hub.utils as hf_utils
+
 config = Config()
 
 
 def summon_papa_gnome():
+    transformers.logging.set_verbosity_error()
+    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+    hf_utils.disable_progress_bars()
+
     model, tokenizer = mlx_load(
         config.main_model,
     )
 
-
     return model, tokenizer
-
 
 
 def build_messages(user_question: str, session_history: list[dict]) -> list[dict]:
