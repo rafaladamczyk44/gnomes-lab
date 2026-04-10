@@ -4,6 +4,8 @@ from mlx_lm import convert
 HF_REPO = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
 OUTPUT_PATH = "./models/Qwen3.5-9B-reasoning-4bit"
 
+# TODO: push to HF
+
 convert(
     hf_path=HF_REPO,
     mlx_path=OUTPUT_PATH,
