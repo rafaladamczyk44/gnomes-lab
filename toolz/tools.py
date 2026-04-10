@@ -2,6 +2,12 @@ import glob
 import re
 import subprocess
 from pathlib import Path
+from dotenv import load_dotenv
+import os
+from tavily import TavilyClient
+load_dotenv('.env')
+
+
 
 # Patterns blocked in bash_exec for safety
 _BLOCKED_PATTERNS = [
@@ -13,6 +19,8 @@ _BLOCKED_PATTERNS = [
     r"chmod\s+-R\s+777\s+/",
 ]
 
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+tavily_client = TavilyClient(TAVILY_API_KEY)
 
 def bash_exec(cmd: str, timeout: int = 30) -> dict:
     for pattern in _BLOCKED_PATTERNS:
@@ -103,9 +111,18 @@ def grep_search(pattern: str, path: str) -> dict:
 
 def web_search(query: str, n: int = 5) -> dict:
     # TODO: plug in a search backend (e.g. duckduckgo_search, SearXNG, Brave API)
-    return {
-        "tool": "web_search",
-        "ok": False,
-        "result": None,
-        "error": "web_search not yet implemented — no backend configured",
-    }
+
+    try:
+        response = tavily_client.search(
+            query=query,
+            maxResults=3,
+        )
+
+        results = []
+
+        for res in response['results']:
+            results.append(res['content'])
+
+        return {"tool": "web_search", "ok": True, "result": results, "error": None}
+    except Exception as e:
+        return {"tool": "web_search", "ok": False, "result": None, "error": str(e)}
