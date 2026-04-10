@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A local, lightweight personal assistant running entirely on Apple Silicon. The goal is a Claude Code-like experience powered by local models — interactive REPL, tool use (file ops, bash, search), agentic loop, and persistent memory.
 
-See `PLAN.md` for the full implementation roadmap.
+See `PLAN.md` for the full implementation roadmap and current status.
 
 ---
 
@@ -21,9 +21,9 @@ See `PLAN.md` for the full implementation roadmap.
 
 All models run at **4-bit quantization**. Memory: ~5 GB (9B) + ~2.5 GB (4B) = ~7.5 GB total on 16 GB M2 Pro.
 
-**Papa Gnome (9B)** is the primary — it reads every message, drives the agent loop, decides tool calls, and generates the final answer.
+**Papa Gnome (9B)** is the primary — reads every message, drives the agent loop, decides tool calls, generates the final answer.
 
-**Mama Gnome (4B)** is a helper only — activated when a tool returns a large output (> ~500 tokens) to compress it before it enters the 9B's context. Never in the routing critical path.
+**Mama Gnome (4B)** is a helper only — activated when a tool returns a large output (> ~500 tokens) to compress it before it enters 9B's context. Not yet wired in.
 
 ### Flow
 
@@ -31,15 +31,10 @@ All models run at **4-bit quantization**. Memory: ~5 GB (9B) + ~2.5 GB (4B) = ~7
 User message
     └─► Papa Gnome (9B) — reads full conversation context
             ├─ trivial? → answer directly
-            ├─ needs tools? → output tool_calls JSON → Python executes tools
-            │       └─ output > 500 tokens? → Mama Gnome (4B) compresses it
-            ├─ needs memory? → call memory_recall tool → inject relevant facts
+            ├─ needs tools? → output <tool_call> → Python executes tools
+            │       └─ output > 500 tokens? → Mama Gnome (4B) compresses it  [not yet]
             └─ stream final answer to user
 ```
-
-### Why not route via 4B first?
-
-The tasks worth using a local assistant for are tool-heavy and multi-step — exactly where 9B-primary wins. A 4B routing classifier adds a round-trip to every query (including complex ones that need 9B anyway) with no benefit. Simple tasks where 4B would be faster are tasks you'd handle more quickly yourself.
 
 ---
 
@@ -49,19 +44,13 @@ The tasks worth using a local assistant for are tool-heavy and multi-step — ex
 - Local path: `./models/Qwen3.5-9B-reasoning-4bit`
 - Source: `Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2` converted via `conversion.py`
 - Loaded via `mlx_lm` — instruct-tuned, reasoning-distilled from Claude Opus 4.6
-- Use `tokenizer_config={"fix_mistral_regex": True}` when loading (tokenizer quirk)
 
 **Context reducer (Mama Gnome):**
 - `mlx-community/Qwen3-4B-Instruct-2507-mxfp4` — loaded via `mlx_lm`
-- Text-only, instruct-tuned, reliable JSON output
-
-**Embedding model (for semantic memory — optional):**
-- `mlx-community/Qwen3-Embedding-4B-4bit-DWQ` — already in HF cache
-- Used for Tier 2 memory search (not yet implemented)
 
 **Note on Qwen3.5 vs Qwen3:**
 - Qwen3.5 mlx-community models have vision towers → require `mlx_vlm`
-- Qwen3-Instruct models are text-only → use `mlx_lm` (better JSON, instruct-tuned)
+- Qwen3-Instruct models are text-only → use `mlx_lm`
 - The distilled 9B (`Jackrong/...`) is text-only → use `mlx_lm`
 
 ---
@@ -70,104 +59,108 @@ The tasks worth using a local assistant for are tool-heavy and multi-step — ex
 
 ```
 gnomes-lab/
-├── main.py                        # Entry point — REPL loop (in progress)
-├── config.py                      # Config dataclass: model paths, settings
+├── main.py                        # Entry point — REPL + agentic loop
+├── config.py                      # Config dataclass: model paths
 ├── conversion.py                  # Convert HF model to local MLX 4-bit
-├── test.py                        # Quick model smoke test
-├── utils.py                       # Shared helpers (partially outdated)
-├── sketch.py                      # Original prototype (not imported)
-├── PLAN.md                        # Full implementation roadmap
+├── PLAN.md                        # Full implementation roadmap + status
 └── gnomes_village/
-    ├── __init__.py
-    ├── papa_gnome.py              # PRIMARY agent (9B): load, generate, tool-call loop
-    ├── mama_gnome.py              # Context reducer (4B): compress large tool output
-    ├── small_gnomes.py            # Legacy small gnome workers (2B, not in main flow)
-    ├── tools.py                   # Tool implementations: bash_exec, read_file, etc.
-    └── tool_registry.py           # Tool schemas, dispatch, format_result
-~/.gnomes/
-    ├── context.md                 # Personal always-on context (user-written)
-    ├── history.jsonl              # Conversation history (append-only log)
-    └── memory/
-        ├── INDEX.md               # One-liner per memory file (loaded at startup)
-        └── *.md                   # Agent-written memory files
+    ├── papa_gnome.py              # PRIMARY agent: build_messages(), papa_gnome_answers()
+    ├── mama_gnome.py              # Context reducer (4B) — not yet wired into main flow
+    └── small_gnomes.py            # Unused
+└── toolz/
+    ├── tools.py                   # Tool implementations (bash_exec, read_file, web_search, etc.)
+    └── tool_registry.py           # TOOL_SCHEMAS, dispatch(), format_result()
 ```
 
 ---
 
-## Config
+## Current Implementation Status
 
-```python
-# config.py
-from dataclasses import dataclass
+**Working:**
+- Agentic loop in `main.py`: stream → parse tool calls → confirm → execute → feed results back → repeat
+- Native Qwen3 tool calling via `<tool_call>` / `</tool_call>` tags
+- Thinking token stripping: `<think>...</think>` shown to user but stripped before history
+- Session history: last 5 turns injected into system prompt
+- Tool guardrails: `bash_exec`, `write_file`, `web_search` require confirmation; others run automatically
+- All 6 tools functional including Tavily web search
 
-@dataclass
-class Config:
-    main_model: str = './models/Qwen3.5-9B-reasoning-4bit'   # Papa Gnome (9B)
-    small_model: str = 'mlx-community/Qwen3-4B-Instruct-2507-mxfp4'  # Mama Gnome (4B)
-```
-
-Always use `os.path.expanduser()` when passing paths to `mlx_lm.load()`.
+**Not yet done:**
+- Persistent history (`~/.gnomes/history.jsonl`)
+- Always-on context files (`~/.gnomes/context.md`, `./GNOMES.md`)
+- Agentic memory (`~/.gnomes/memory/`)
+- 4B context reducer for large tool outputs
+- Slash commands (`/clear`, `/history`, `/tools`)
 
 ---
 
 ## Tech Stack
 
 - **mlx_lm** — used for both Papa and Mama Gnome
-  - `load(path, tokenizer_config={...})` returns `(model, tokenizer)`
-  - `generate()` returns plain `str`
-  - `stream_generate()` returns token iterator (for streaming final answers)
+  - `load(path)` returns `(model, tokenizer)`
+  - `stream_generate()` returns token iterator
   - Sampling: `make_sampler(temp, top_p, min_p, top_k)` from `mlx_lm.sample_utils`
   - Repetition: `make_logits_processors(repetition_penalty)` from `mlx_lm.sample_utils`
-  - Thinking: `tokenizer.apply_chat_template(..., enable_thinking=True/False)`
+  - Thinking: reasoning model always starts in thinking mode; `apply_chat_template` injects `<think>` into generation prompt automatically
 
 ### mlx_lm load pattern
 ```python
-import os
-from mlx_lm import load as mlx_load, generate
+from mlx_lm import load as mlx_load, stream_generate
 from mlx_lm.sample_utils import make_sampler, make_logits_processors
 from config import Config
 
 config = Config()
-model, tokenizer = mlx_load(
-    os.path.expanduser(config.main_model),
-    tokenizer_config={"fix_mistral_regex": True},
-)
+model, tokenizer = mlx_load(config.main_model)
 ```
 
-### Tool-call JSON schema (Papa Gnome output)
+### Tool-call format (native Qwen3 chat template)
 
-Papa Gnome outputs one of two structures per turn:
-
-```json
-// Needs tools
-{"tool_calls": [{"tool": "read_file", "args": {"path": "main.py"}}], "thinking": "..."}
-
-// Final answer
-{"answer": "the response text"}
+Model outputs:
+```
+<tool_call>
+{"name": "read_file", "arguments": {"path": "main.py"}}
+</tool_call>
 ```
 
-`enable_thinking=False` for tool-call turns (structured JSON); `enable_thinking=True` for final answer.
+Tool result fed back as:
+```python
+{"role": "tool", "content": "formatted result string"}
+```
 
-### JSON parsing (tool-call response)
-1. Strip everything before/up to `</think>` token if present
-2. Try `raw_decode` from first `{`
-3. Fallback: extract `{...}` block, clean escape issues
+### Thinking token handling
+- `apply_chat_template` with `add_generation_prompt=True` injects `<think>` into the prompt
+- Model stream starts already inside thinking — `<think>` never appears in the token stream
+- Start `in_thinking = True`, watch for `</think>` to switch
+- `full_raw` (with thinking) → stored in `messages` list for model context
+- `agent_answer` (post-`</think>`) → stored in session history, parsed for tool calls
 
----
+### Agent output format (enforced via system prompt)
 
-## Agent Flow Detail
+Simple answer:
+```
+## Answer
+<response>
+```
 
-1. **REPL** reads user input, appends to conversation history
-2. **Papa Gnome** generates response — either `tool_calls` JSON or `answer`
-3. If `tool_calls`: Python dispatches each tool (parallel via `ThreadPoolExecutor`)
-   - If result > 500 tokens: **Mama Gnome** compresses it
-   - Compressed/raw result appended to history as `role: tool`
-   - Loop back to step 2
-4. If `answer`: stream tokens to terminal, append to history, save to `history.jsonl`
-5. If agent calls `memory_save`: write to `~/.gnomes/memory/`, update INDEX
-6. If agent calls `memory_recall`: grep memory files, inject results into context
+Tool-using turn:
+```
+## Plan
+- step 1
+- step 2
+<tool_call>...</tool_call>
+```
 
-Max iterations: 10. User confirmation required before destructive tool calls.
+### Agentic loop (main.py)
+```
+messages = build_messages(query, session_history)
+for _ in range(MAX_TOOL_ITERATIONS=10):
+    stream + collect → (full_raw, agent_answer)
+    messages.append({"role": "assistant", "content": full_raw})
+    if no tool_calls in agent_answer → final answer, break
+    for each tool_call:
+        confirm if in REQUIRE_APPROVAL = {bash_exec, write_file, web_search}
+        dispatch → format_result → messages.append({"role": "tool", "content": result})
+session_history.append({"user": query, "agent": final_answer})
+```
 
 ---
 
@@ -180,5 +173,4 @@ uv sync                                      # install all dependencies
 uv run main.py                               # run via managed venv
 source .venv/bin/activate && python main.py  # or activate directly
 python conversion.py                         # convert + quantize model to local MLX
-python test.py                               # smoke test the primary model
 ```
