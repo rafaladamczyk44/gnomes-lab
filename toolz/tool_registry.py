@@ -106,6 +106,7 @@ def dispatch(tool_name: str, args: dict) -> dict:
     fn = _DISPATCH.get(tool_name)
     if fn is None:
         return {"tool": tool_name, "ok": False, "result": None, "error": f"Unknown tool: {tool_name}"}
+
     return fn(**args)
 
 
@@ -151,8 +152,7 @@ def format_result(result: dict) -> str:
         return f"[Tool: grep_search] {r['count']} matches:\n" + "\n".join(lines) + suffix
 
     if tool == "web_search":
-        results = r.get("results", [])
-        lines = [f"{i+1}. {res['title']}\n   {res['url']}\n   {res['snippet']}" for i, res in enumerate(results)]
+        lines = [f"{i+1}. {res}" for i, res in enumerate(r)]
         return f"[Tool: web_search]\n" + "\n".join(lines)
 
     return f"[Tool: {tool}] {r}"
