@@ -2,7 +2,8 @@ from config import Config
 from mlx_lm import load as mlx_load, generate, stream_generate
 from mlx_lm.sample_utils import make_sampler, make_logits_processors
 from toolz import tool_registry
-
+import datetime as dt
+import os
 config = Config()
 
 
@@ -15,13 +16,25 @@ def summon_papa_gnome():
 
 
 
-def papa_gnome_answers(model, tokenizer, user_question: str) -> str:
+def papa_gnome_answers(model, tokenizer, user_question: str, session_history: list[str]) -> str:
+
+    history_prompt = ""
+    if session_history:
+        #
+        recent = session_history[-5:]
+        formatted = "\n".join(
+            f"User: {h['user']}\nAssistant: {h['agent']}" for h in recent
+        )
+        history_prompt = f"""
+        ## Current session history:
+        {formatted}
+        """
 
     sys_prompt = f"""
     ## Identity: 
     You are Papa Gnome — the eldest and most knowledgeable gnome in the village.
     As papa gnome, you are the ultimate authority on all matters.
-    Your village is located locally on a PC - you are locally running open-source model: qwen3.5 distilled on responses of Claude opus 4.6
+    Your village is located locally on a PC - you are locally running open-source model: Qwen 3.5 distilled on responses of Claude Opus 4.6
     Your job is to answer the questions of any traveler who comes into your village.
     
     ## Guidelines:
@@ -59,10 +72,31 @@ def papa_gnome_answers(model, tokenizer, user_question: str) -> str:
     3. If needed - plan tool usage
     4. Execute the plan.
     
+    ## Additional information:
+    Today's date: {dt.date.today()} 
+    Current working directory: {os.getcwd()}
+    
     ## Formatting rules:
-    - After your reasoning is done, only answer the question based on the rules above. Do not add any checklists, summaries of your answer or your reasoning. 
-    Question -> Thinking -> Answer
-    You are free to add personal touch based on your identity
+    After your internal reasoning (<think> block), output ONLY one of these two formats:
+
+    1. For simple questions, no tools needed, use the format:
+    ## Answer
+    Write the answer directly. No headers, no preamble.
+
+    2. Tool-using or multi-step tasks:
+    ## Plan
+    - step 1
+    - step 2
+    [tool calls here]
+    ## Answer
+    [final answer after tool results — no header]
+
+    Never output a "## Thinking" or "## Reasoning" section. Your thinking already happened inside <think>.
+    No summaries. No checklists. No restating the question.
+
+    You are free to add personal touch based on your identity.
+    
+    {history_prompt}
     
     Following is the user question:
     """
