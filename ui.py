@@ -1,0 +1,117 @@
+import sys
+import re
+from rich.console import Console
+from rich.panel import Panel
+from rich.live import Live
+from rich.text import Text
+from rich.spinner import Spinner
+
+console = Console()
+VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
+
+_STRIP_HEADERS = re.compile(r'^(##\s*(Answer|Plan)\s*\n?|---\s*\n?)', re.MULTILINE)
+_STRIP_TOOL_CALLS = re.compile(r'<tool_call>.*?</tool_call>', re.DOTALL)
+
+
+def _strip_model_headers(text: str) -> str:
+    text = _STRIP_TOOL_CALLS.sub('', text)
+    text = _STRIP_HEADERS.sub('', text)
+    return text.lstrip('\n').rstrip()
+
+
+def stream_turn(generator):
+    """
+    Stream a model turn with rich UI.
+    Phase 1: spinner while thinking.
+    Phase 2: live-stream the answer into a panel.
+    Returns (full_raw, agent_answer).
+    """
+    full_raw = ''
+    pending = ''
+    thinking_content = ''
+    agent_answer = ''
+
+    # Phase 1 — thinking: show spinner, buffer until </think>
+    with Live(
+        Spinner('dots', text='[dim]Thinking...[/dim]'),
+        console=console,
+        refresh_per_second=10,
+        transient=True,
+    ) as live:
+        for chunk in generator:
+            full_raw += chunk
+            pending += chunk
+            thinking_content += chunk
+            if '</think>' in pending:
+                agent_answer = pending.split('</think>', 1)[1]
+                break
+
+    if VERBOSE and thinking_content.strip():
+        console.print(Panel(
+            thinking_content.strip(),
+            title='[dim]Thinking[/dim]',
+            border_style='dim',
+            padding=(0, 1),
+        ))
+
+    # Phase 2 — answer: live-stream remaining tokens into a panel
+    answer_text = Text()
+    with Live(
+        Panel(answer_text, title='[bold green]Papa Gnome[/bold green]', border_style='green', padding=(0, 1)),
+        console=console,
+        refresh_per_second=20,
+    ) as live:
+        for chunk in generator:
+            full_raw += chunk
+            agent_answer += chunk
+            answer_text = Text(_strip_model_headers(agent_answer))
+            live.update(Panel(answer_text, title='[bold green]Papa Gnome[/bold green]', border_style='green', padding=(0, 1)))
+
+    return full_raw, agent_answer
+
+
+def show_tool_auto(name, args):
+    """Dim one-liner for tools that run without approval."""
+    args_str = ', '.join(f'{k}={repr(v)}' for k, v in args.items())
+    console.print(f'  [dim]⚙  {name}({args_str})[/dim]')
+
+
+def confirm_tool(name, args):
+    """Yellow warning panel + prompt. Returns True if approved."""
+    args_str = ', '.join(f'[bold]{k}[/bold]={repr(v)}' for k, v in args.items())
+    console.print(Panel(
+        f'  {name}({args_str})',
+        title='[yellow bold]⚠  Approval required[/yellow bold]',
+        border_style='yellow',
+        padding=(0, 1),
+    ))
+    choice = console.input('  [yellow][[1] Allow  [2] Skip][/yellow] › ')
+    return choice.strip() == '1'
+
+
+def show_tool_result(name, result):
+    """Dim panel showing tool output — only in verbose mode."""
+    if not VERBOSE:
+        return
+    display = result if len(result) < 1500 else result[:1500] + '\n[dim]... truncated[/dim]'
+    console.print(Panel(
+        display,
+        title=f'[dim]↳ {name}[/dim]',
+        border_style='dim',
+        padding=(0, 1),
+    ))
+
+
+def show_skipped(name):
+    console.print(f'  [dim]✗  {name} skipped[/dim]')
+
+
+def user_input():
+    return console.input('\n[bold cyan]You[/bold cyan] › ')
+
+
+def startup(model_name):
+    console.rule('[bold green]Gnomes Village[/bold green]')
+    console.print(f'  [dim]model: {model_name}[/dim]')
+    console.print(f'  [dim]type "exit" to quit{" · --verbose for thinking" if not VERBOSE else " · thinking visible"}[/dim]')
+    console.rule()
