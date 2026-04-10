@@ -12,7 +12,6 @@ def summon_papa_gnome():
         config.main_model,
     )
 
-    print("Summoned Papa Gnome")
 
     return model, tokenizer
 
@@ -124,54 +123,3 @@ def papa_gnome_answers(model, tokenizer, messages: list[dict]):
     ):
         if token.text:
             yield token.text
-
-
-
-"""
-Native tool calling confirmed — Approach 1. The template tells you exactly how it works:
-
-  What the template does
-
-  When you pass tools=[...]: it injects the schemas inside <tools> XML tags into the system prompt automatically. You don't describe tools in your system prompt
-  manually anymore.
-
-  Model output when it wants a tool:
-  <tool_call>
-  {"name": "read_file", "arguments": {"path": "main.py"}}
-  </tool_call>
-
-  Tool result back to model: you append a message with role: "tool" and the result as content. The template wraps it in <tool_response> tags for you.
-
-  What you need to do
-
-  1. Convert your schemas to OpenAI function-call format — that's what the template expects:
-  {
-    "type": "function",
-    "function": {
-      "name": "read_file",
-      "description": "Read the full contents of a file.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {"type": "string", "description": "absolute or relative file path"}
-        },
-        "required": ["path"]
-      }
-    }
-  }
-  Your TOOL_SCHEMAS in tool_registry.py need to be converted to this shape.
-
-  2. Pass them to apply_chat_template:
-  tokenizer.apply_chat_template(messages, tools=TOOL_SCHEMAS_OPENAI_FORMAT, ...)
-
-  3. Detect tool calls in the output — check if <tool_call> appears in the response string, extract the JSON between the tags.
-
-  4. Run the tool via tool_registry.dispatch() (already built).
-
-  5. Append result to messages:
-  {"role": "tool", "content": "the tool output string"}
-
-  6. Loop — call the model again with the updated messages. It will either call another tool or produce a final answer.
-
-  That's the complete wiring. The only missing piece is reformatting TOOL_SCHEMAS into OpenAI format and writing the parse-and-loop logic.
-"""
