@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
+    "dotenv>=0.9.9",
     "llama-cpp-python>=0.3.16",
     "mlx-lm>=0.30.7",
     "mlx-vlm>=0.3.12",
+    "tavily-python>=0.7.23",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
     "transformers>=5.3.0",
