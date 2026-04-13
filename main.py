@@ -7,17 +7,49 @@ import json
 from config import Config
 
 MAX_TOOL_ITERATIONS = 10
-REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'web_search'}
+REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'edit_file', 'web_search'}
 config = Config()
+
+def _escape_control_chars(s):
+    """Escape literal control characters inside JSON string values."""
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in s:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+        elif ch == '\\' and in_string:
+            result.append(ch)
+            escape_next = True
+        elif ch == '"':
+            result.append(ch)
+            in_string = not in_string
+        elif in_string and ord(ch) < 0x20:
+            if ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(f'\\u{ord(ch):04x}')
+        else:
+            result.append(ch)
+    return ''.join(result)
+
 
 def tool_call_extract(text):
     matches = re.findall(r'<tool_call>(.*?)</tool_call>', text, re.DOTALL)
     if not matches:
         return None
-    return [json.loads(m.strip()) for m in matches]
+    return [json.loads(_escape_control_chars(m.strip())) for m in matches]
 
 
 model, tokenizer = papa_gnome.summon_papa_gnome()
+# --- Gnome Hut Demo Call (from Element 2 in ui.py) ---
+ui.show_gnome_hut_demo()
+
 ui.startup(model_name=config.main_model)
 
 current_session_history = []
@@ -45,10 +77,13 @@ while True:
             args = tool['arguments']
 
             if name in REQUIRE_APPROVAL:
-                approved = ui.confirm_tool(name, args)
+                approved, feedback = ui.confirm_tool(name, args)
                 if not approved:
                     ui.show_skipped(name)
-                    messages.append({"role": "tool", "content": f"Tool '{name}' was skipped by the user."})
+                    skip_msg = f"Tool '{name}' was skipped by the user."
+                    if feedback:
+                        skip_msg += f" Reason: {feedback}"
+                    messages.append({"role": "tool", "content": skip_msg})
                     continue
             else:
                 ui.show_tool_auto(name, args)

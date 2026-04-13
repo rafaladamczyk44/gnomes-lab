@@ -1,5 +1,6 @@
 import sys
 import re
+import difflib
 from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
@@ -7,6 +8,22 @@ from rich.text import Text
 from rich.spinner import Spinner
 
 console = Console()
+
+# --- Gnome Hut Demo Panel (Element 2) ---
+def show_gnome_hut_demo():
+    gnome_hut = Panel(
+        "Welcome to the Gnome Village!\n\n⛺ The Hut ⛺\n\n" +
+        "   /\\   \n" +
+        "  /  \\  \n" +
+        " | O O| \n" +
+        " |  U | \n" +
+        " \\__/  ",
+        title="[bold green]🏡 Gnome Hut[/bold green]",
+        border_style="green",
+        padding=(1, 2),
+    )
+    console.print(gnome_hut)
+
 VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
 
 _STRIP_HEADERS = re.compile(r'^(##\s*(Answer|Plan)\s*\n?|---\s*\n?)', re.MULTILINE)
@@ -76,17 +93,47 @@ def show_tool_auto(name, args):
     console.print(f'  [dim]⚙  {name}({args_str})[/dim]')
 
 
+def _render_edit_diff(args) -> Text:
+    path = args.get('path', '')
+    old = args.get('old_string', '')
+    new = args.get('new_string', '')
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(old_lines, new_lines, fromfile=path, tofile=path, lineterm=''))
+    t = Text()
+    t.append(f'  {path}\n', style='bold')
+    for line in diff[2:]:  # skip --- +++ header lines
+        if line.startswith('+'):
+            t.append(line + '\n', style='green')
+        elif line.startswith('-'):
+            t.append(line + '\n', style='red')
+        elif line.startswith('@@'):
+            t.append(line + '\n', style='cyan dim')
+        else:
+            t.append(line + '\n', style='dim')
+    return t
+
+
 def confirm_tool(name, args):
     """Yellow warning panel + prompt. Returns True if approved."""
-    args_str = ', '.join(f'[bold]{k}[/bold]={repr(v)}' for k, v in args.items())
+    if name == 'edit_file':
+        content = _render_edit_diff(args)
+    else:
+        args_str = ', '.join(f'[bold]{k}[/bold]={repr(v)}' for k, v in args.items())
+        content = f'  {name}({args_str})'
     console.print(Panel(
-        f'  {name}({args_str})',
+        content,
         title='[yellow bold]⚠  Approval required[/yellow bold]',
         border_style='yellow',
         padding=(0, 1),
     ))
-    choice = console.input('  [yellow][[1] Allow  [2] Skip][/yellow] › ')
-    return choice.strip() == '1'
+    choice = console.input('  [yellow][[1] Allow  [2] Skip  [3] Skip + feedback][/yellow] › ').strip()
+    if choice == '1':
+        return True, None
+    if choice == '3':
+        feedback = console.input('  [yellow]Feedback › [/yellow]').strip()
+        return False, feedback
+    return False, None
 
 
 def show_tool_result(name, result):
