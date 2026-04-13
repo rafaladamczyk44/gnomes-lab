@@ -16,7 +16,7 @@ See `PLAN.md` for the full implementation roadmap and current status.
 
 | Role | Name | Model | Runtime |
 |------|------|-------|---------|
-| Primary agent | Papa Gnome | `Qwen3.5-9B-reasoning-4bit` (local, distilled) | mlx_lm → Metal/GPU |
+| Primary agent | Papa Gnome | `rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit` (local, distilled) | mlx_lm → Metal/GPU |
 | Context reducer | Mama Gnome | `Qwen3-4B-Instruct-2507-mxfp4` | mlx_lm → Metal/GPU |
 
 All models run at **4-bit quantization**. Memory: ~5 GB (9B) + ~2.5 GB (4B) = ~7.5 GB total on 16 GB M2 Pro.
