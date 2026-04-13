@@ -18,10 +18,11 @@ source .venv/bin/activate && python main.py
 ## Switching the model
 
 Models are configured in `config.py`. Change the path there to swap the primary or context-reducer model.
+Default model is mlx-converted from HuggingFace's Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2 (https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
 
 ```python
 # config.py
-main_model = "./models/Qwen3.5-9B-reasoning-4bit"   # Papa Gnome (primary)
+main_model = "rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"   # Papa Gnome (primary)
 reducer_model = "mlx-community/Qwen3-4B-Instruct-2507-mxfp4"  # Mama Gnome (context reducer)
 ```
 
