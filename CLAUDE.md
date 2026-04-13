@@ -81,8 +81,12 @@ gnomes-lab/
 - Native Qwen3 tool calling via `<tool_call>` / `</tool_call>` tags
 - Thinking token stripping: `<think>...</think>` shown to user but stripped before history
 - Session history: last 5 turns injected into system prompt
-- Tool guardrails: `bash_exec`, `write_file`, `web_search` require confirmation; others run automatically
-- All 6 tools functional including Tavily web search
+- Tool guardrails: `bash_exec`, `write_file`, `edit_file`, `web_search` require confirmation; others run automatically
+- 8 tools: `list_files`, `grep_search`, `read_file` (with offset/length), `edit_file`, `write_file`, `web_search`, `bash_exec`, `cd`
+- Approval UI: 3 options — Allow / Skip / Skip + feedback (feedback injected into model context)
+- Diff view for `edit_file` approval: shows red/green unified diff instead of raw args
+- JSON control-character sanitiser in `tool_call_extract` (handles literal newlines in model-generated JSON)
+- Tool usage rules in system prompt steering agent away from `bash_exec` for file ops
 
 **Not yet done:**
 - Persistent history (`~/.gnomes/history.jsonl`)
@@ -157,7 +161,7 @@ for _ in range(MAX_TOOL_ITERATIONS=10):
     messages.append({"role": "assistant", "content": full_raw})
     if no tool_calls in agent_answer → final answer, break
     for each tool_call:
-        confirm if in REQUIRE_APPROVAL = {bash_exec, write_file, web_search}
+        confirm if in REQUIRE_APPROVAL = {bash_exec, write_file, edit_file, web_search}
         dispatch → format_result → messages.append({"role": "tool", "content": result})
 session_history.append({"user": query, "agent": final_answer})
 ```
