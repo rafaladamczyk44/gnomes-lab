@@ -9,20 +9,21 @@ from rich.spinner import Spinner
 
 console = Console()
 
-# --- Gnome Hut Demo Panel (Element 2) ---
+# --- Gnome Hut welcome ---
 def show_gnome_hut_demo():
-    gnome_hut = Panel(
-        "Welcome to the Gnome Village!\n\n⛺ The Hut ⛺\n\n" +
-        "   /\\   \n" +
-        "  /  \\  \n" +
-        " | O O| \n" +
-        " |  U | \n" +
-        " \\__/  ",
-        title="[bold green]🏡 Gnome Hut[/bold green]",
-        border_style="green",
-        padding=(1, 2),
-    )
-    console.print(gnome_hut)
+    console.print()
+    console.print('  [bold green]🏡 Gnome Hut[/bold green]')
+    console.print()
+    console.print('  Welcome to the Gnome Village!')
+    console.print()
+    console.print('  ⛺ The Hut ⛺')
+    console.print()
+    console.print('  [green]   /\\   [/green]')
+    console.print('  [green]  /  \\  [/green]')
+    console.print('  [green] | O O| [/green]')
+    console.print('  [green] |  U | [/green]')
+    console.print('  [green]  \\__/  [/green]')
+    console.print()
 
 VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
 
@@ -72,17 +73,24 @@ def stream_turn(generator):
         ))
 
     # Phase 2 — answer: live-stream remaining tokens into a panel
-    answer_text = Text()
+    def _answer_panel(text):
+        return Panel(
+            Text(text),
+            title='[bold green]Papa Gnome[/bold green]',
+            border_style='green',
+            padding=(0, 1),
+            width=console.width,
+        )
+
     with Live(
-        Panel(answer_text, title='[bold green]Papa Gnome[/bold green]', border_style='green', padding=(0, 1)),
+        _answer_panel(''),
         console=console,
         refresh_per_second=20,
     ) as live:
         for chunk in generator:
             full_raw += chunk
             agent_answer += chunk
-            answer_text = Text(_strip_model_headers(agent_answer))
-            live.update(Panel(answer_text, title='[bold green]Papa Gnome[/bold green]', border_style='green', padding=(0, 1)))
+            live.update(_answer_panel(_strip_model_headers(agent_answer)))
 
     return full_raw, agent_answer
 
@@ -158,7 +166,7 @@ def user_input():
 
 
 def startup(model_name):
-    console.rule('[bold green]Gnomes Village[/bold green]')
+    console.print(f'  [bold green]Gnomes Village[/bold green]')
     console.print(f'  [dim]model: {model_name}[/dim]')
     console.print(f'  [dim]type "exit" to quit{" · --verbose for thinking" if not VERBOSE else " · thinking visible"}[/dim]')
-    console.rule()
+    console.print()
