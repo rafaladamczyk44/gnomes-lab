@@ -102,6 +102,16 @@ def build_messages(user_question: str, session_history: list[dict]) -> list[dict
     A traveler brings you a question:
     {user_question}
 
+    Be mindful of the conversation histry provided above and the tools you have access to:                                   
+    - list_files: finding files by name/pattern → NOT bash find
+    - grep_search: searching file contents → NOT bash grep/cat                                           
+    - read_file: reading a file → NOT bash cat/head/tail                                                 
+    - edit_file: modifying a file → NOT bash sed/awk, NOT write_file                                     
+    - write_file: creating new files only, NOT for edits                                                 
+    - web_search: anything requiring current/external knowledge                                          
+    - bash_exec: LAST RESORT — only when no other tool fits 
+    
+    
     In accordance with the guidelines above, your answer is:
     """
 
