@@ -8,7 +8,6 @@ from tavily import TavilyClient
 load_dotenv('.env')
 
 
-
 # Patterns blocked in bash_exec for safety
 _BLOCKED_PATTERNS = [
     r"rm\s+-rf\s+/",
@@ -21,6 +20,7 @@ _BLOCKED_PATTERNS = [
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(TAVILY_API_KEY)
+
 
 def bash_exec(cmd: str, timeout: int = 30) -> dict:
     for pattern in _BLOCKED_PATTERNS:
@@ -43,15 +43,21 @@ def bash_exec(cmd: str, timeout: int = 30) -> dict:
         return {"tool": "bash_exec", "ok": False, "result": None, "error": str(e)}
 
 
-def read_file(path: str) -> dict:
+def read_file(path: str, offset: int = None, length: int = None) -> dict:
     try:
         p = Path(path).expanduser()
         content = p.read_text(encoding="utf-8", errors="replace")
         lines = content.splitlines()
+        total_lines = len(lines)
+        if offset is not None or length is not None:
+            start = (offset or 1) - 1
+            end = start + length if length is not None else total_lines
+            lines = lines[start:end]
+            content = "\n".join(lines)
         return {
             "tool": "read_file",
             "ok": True,
-            "result": {"content": content, "lines": len(lines), "path": str(p)},
+            "result": {"content": content, "lines": total_lines, "path": str(p)},
             "error": None,
         }
     except Exception as e:
@@ -109,8 +115,41 @@ def grep_search(pattern: str, path: str) -> dict:
         return {"tool": "grep_search", "ok": False, "result": None, "error": str(e)}
 
 
+
+
+# Track current working directory across tool calls
+current_dir: str = os.getcwd()
+
+
+# TODO: register?
+def cd(path: str) -> dict:
+    """Change current working directory."""
+    try:
+        resolved_path = os.path.abspath(os.path.expanduser(path))
+        
+        # Check if path exists and is a directory
+        resolved_path = os.path.normpath(resolved_path)
+        if not os.path.exists(resolved_path):
+            return {"tool": "cd", "ok": False, "result": None, "error": f"No such directory: {path}"}
+        if not os.path.isdir(resolved_path):
+            return {"tool": "cd", "ok": False, "result": None, "error": f"Not a directory: {path}"}
+        
+        # Change directory
+        os.chdir(resolved_path)
+        current_dir = resolved_path
+        
+        return {
+            "tool": "cd",
+            "ok": True,
+            "result": {"path": resolved_path, "previous_dir": current_dir},
+            "error": None,
+        }
+    except Exception as e:
+        return {"tool": "cd", "ok": False, "result": None, "error": str(e)}
+
+
 def web_search(query: str, n: int = 5) -> dict:
-    # TODO: plug in a search backend (e.g. duckduckgo_search, SearXNG, Brave API)
+    # TODO: plug in a search backend (e.g. duckduckgo_search, "SearXNG, Brave API)
 
     try:
         response = tavily_client.search(
@@ -124,5 +163,24 @@ def web_search(query: str, n: int = 5) -> dict:
             results.append(res['content'])
 
         return {"tool": "web_search", "ok": True, "result": results, "error": None}
+
     except Exception as e:
         return {"tool": "web_search", "ok": False, "result": None, "error": str(e)}
+
+
+def edit_file(path: str, old_string: str, new_string: str) -> dict:
+    try:
+        p = Path(path).expanduser()
+        content = p.read_text(encoding="utf-8", errors="replace")
+        count = content.count(old_string)
+        if count == 0:
+            return {"tool": "edit_file", "ok": False, "result": None, "error": "old_string not found in file"}
+        if count > 1:
+            return {"tool": "edit_file", "ok": False, "result": None, "error": f"old_string matches {count} locations — make it more specific"}
+        updated = content.replace(old_string, new_string, 1)
+        p.write_text(updated, encoding="utf-8")
+        return {"tool": "edit_file", "ok": True, "result": {"path": str(p)}, "error": None}
+    except Exception as e:
+        return {"tool": "edit_file", "ok": False, "result": None, "error": str(e)}
+
+
