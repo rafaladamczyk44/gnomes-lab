@@ -1,51 +1,7 @@
-from toolz.tools import bash_exec, read_file, write_file, list_files, grep_search, web_search
+from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search
 
 # Compact schema fed into the model's system prompt
 TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "bash_exec",
-            "description": "Run a shell command and return stdout/stderr. Use for git, python, file ops, etc.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "cmd": {"type": "string", "description": "Shell command to execute"},
-                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
-                },
-                "required": ["cmd"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the full contents of a file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Absolute or relative file path"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "write_file",
-            "description": "Write (overwrite) a file with new content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to write to"},
-                    "content": {"type": "string", "description": "Full file content as a string"},
-                },
-                "required": ["path", "content"],
-            },
-        },
-    },
     {
         "type": "function",
         "function": {
@@ -78,6 +34,53 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_file",
+            "description": "Read the contents of a file. Use offset+length to read a specific line range.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute or relative file path"},
+                    "offset": {"type": "integer", "description": "1-based line number to start reading from"},
+                    "length": {"type": "integer", "description": "Number of lines to read"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Edit a file by replacing an exact string with new content. Use this for file modification (code files, correcting text, etc.)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to edit"},
+                    "old_string": {"type": "string", "description": "Exact string to find (must be unique in the file)"},
+                    "new_string": {"type": "string", "description": "Replacement string"},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write a new file or overwrite a file with new content. Use when specifically asked",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to write to"},
+                    "content": {"type": "string", "description": "Full file content as a string"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "Search the web for a query. Returns titles, URLs, and snippets.",
             "parameters": {
@@ -90,15 +93,31 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "bash_exec",
+            "description": "Run a shell command and return stdout/stderr. Use ONLY when **no other** tool fits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cmd": {"type": "string", "description": "Shell command to execute"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
+                },
+                "required": ["cmd"],
+            },
+        },
+    },
 ]
 
 _DISPATCH = {
-    "bash_exec": bash_exec,
     "read_file": read_file,
     "write_file": write_file,
+    "edit_file": edit_file,
     "list_files": list_files,
     "grep_search": grep_search,
     "web_search": web_search,
+    "bash_exec": bash_exec,
 }
 
 
@@ -138,6 +157,9 @@ def format_result(result: dict) -> str:
 
     if tool == "write_file":
         return f"[Tool: write_file] Written to {r['path']}"
+
+    if tool == "edit_file":
+        return f"[Tool: edit_file] Edited {r['path']}"
 
     if tool == "list_files":
         files = "\n".join(r["matches"]) if r["matches"] else "(no matches)"
