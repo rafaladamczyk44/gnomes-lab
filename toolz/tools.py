@@ -135,6 +135,7 @@ def cd(path: str) -> dict:
             return {"tool": "cd", "ok": False, "result": None, "error": f"Not a directory: {path}"}
         
         # Change directory
+        previous_dir = current_dir
         os.chdir(resolved_path)
         current_dir = resolved_path
         
