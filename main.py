@@ -5,7 +5,9 @@ import ui
 from utils import tool_call_extract, load_context, load_global_context, count_tokens
 from config import Config
 
-MAX_TOOL_ITERATIONS = 10
+# CHANGE 2a — raised from 10; model emits 1 tool/turn so 10 = max 9 reads + answer.
+# Complex multi-file tasks were silently hitting the cap with no output.
+MAX_TOOL_ITERATIONS = 25
 REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'edit_file', 'web_search'}
 config = Config()
 
@@ -60,6 +62,12 @@ while True:
             formatted = tool_registry.format_result(tool_res)
             ui.show_tool_result(name, formatted)
             messages.append({"role": "tool", "content": formatted})
+
+    # CHANGE 2b — when MAX_TOOL_ITERATIONS is exhausted before a final answer,
+    # final_answer stays '' and the user only sees the token count. Show a message.
+    if not final_answer:
+        final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
+        ui.show_skipped('step-limit')
 
     current_session_history.append({'user': query, 'agent': final_answer})
     ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
