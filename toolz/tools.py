@@ -19,7 +19,9 @@ _BLOCKED_PATTERNS = [
 ]
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-tavily_client = TavilyClient(TAVILY_API_KEY)
+# CHANGE 3b — removed module-level TavilyClient(TAVILY_API_KEY) here.
+# It crashed startup when TAVILY_API_KEY was missing even if web_search was never used.
+# Client is now created lazily inside web_search().
 
 
 def bash_exec(cmd: str, timeout: int = 30) -> dict:
@@ -124,25 +126,26 @@ current_dir: str = os.getcwd()
 # TODO: register?
 def cd(path: str) -> dict:
     """Change current working directory."""
+    # CHANGE 3a — `global current_dir` is required; without it, `current_dir = resolved_path`
+    # is a local assignment and the module-level variable is never updated.
+    global current_dir
     try:
         resolved_path = os.path.abspath(os.path.expanduser(path))
-        
-        # Check if path exists and is a directory
         resolved_path = os.path.normpath(resolved_path)
         if not os.path.exists(resolved_path):
             return {"tool": "cd", "ok": False, "result": None, "error": f"No such directory: {path}"}
         if not os.path.isdir(resolved_path):
             return {"tool": "cd", "ok": False, "result": None, "error": f"Not a directory: {path}"}
-        
-        # Change directory
-        previous_dir = current_dir
+
+        previous_dir = current_dir       # save before overwrite
         os.chdir(resolved_path)
-        current_dir = resolved_path
-        
+        current_dir = resolved_path      # now correctly updates the module-level var
+
         return {
             "tool": "cd",
             "ok": True,
-            "result": {"path": resolved_path, "previous_dir": current_dir},
+            # CHANGE 3a — was `current_dir` (new path after reassignment); now `previous_dir`
+            "result": {"path": resolved_path, "previous_dir": previous_dir},
             "error": None,
         }
     except Exception as e:
@@ -150,21 +153,17 @@ def cd(path: str) -> dict:
 
 
 def web_search(query: str, n: int = 5) -> dict:
-    # TODO: plug in a search backend (e.g. duckduckgo_search, "SearXNG, Brave API)
-
+    # TODO: plug in a search backend (e.g. duckduckgo_search, SearXNG, Brave API)
+    # CHANGE 3b — lazy init: create TavilyClient here instead of at module import.
+    # Returns a clean error if the API key is missing rather than crashing startup.
+    if not TAVILY_API_KEY:
+        return {"tool": "web_search", "ok": False, "result": None,
+                "error": "TAVILY_API_KEY not set in environment"}
     try:
-        response = tavily_client.search(
-            query=query,
-            maxResults=3,
-        )
-
-        results = []
-
-        for res in response['results']:
-            results.append(res['content'])
-
+        client = TavilyClient(TAVILY_API_KEY)
+        response = client.search(query=query, maxResults=3)
+        results = [res['content'] for res in response['results']]
         return {"tool": "web_search", "ok": True, "result": results, "error": None}
-
     except Exception as e:
         return {"tool": "web_search", "ok": False, "result": None, "error": str(e)}
 
