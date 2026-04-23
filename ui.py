@@ -29,9 +29,17 @@ VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
 
 _STRIP_HEADERS = re.compile(r'^(##\s*(Answer|Plan)\s*\n?|---\s*\n?)', re.MULTILINE)
 _STRIP_TOOL_CALLS = re.compile(r'<tool_call>.*?</tool_call>', re.DOTALL)
+# CHANGE 1a — Qwen3 sometimes emits a second <think>…</think> block mid-response
+# (inline re-reasoning before a tool call). stream_turn only splits on the first
+# </think>, so subsequent blocks and stray closing tags land in agent_answer and
+# render verbatim in the panel. Strip both patterns before display.
+_STRIP_THINK_BLOCK = re.compile(r'<think>.*?</think>', re.DOTALL)
+_STRIP_THINK_CLOSE = re.compile(r'</think>')
 
 
 def _strip_model_headers(text: str) -> str:
+    text = _STRIP_THINK_BLOCK.sub('', text)   # CHANGE 1a — remove inline <think> blocks
+    text = _STRIP_THINK_CLOSE.sub('', text)   # CHANGE 1a — remove stray </think> tags
     text = _STRIP_TOOL_CALLS.sub('', text)
     text = _STRIP_HEADERS.sub('', text)
     return text.lstrip('\n').rstrip()
@@ -90,7 +98,11 @@ def stream_turn(generator):
         for chunk in generator:
             full_raw += chunk
             agent_answer += chunk
-            live.update(_answer_panel(_strip_model_headers(agent_answer)))
+            # CHANGE 1b — when the model puts its plan inside <think> and emits
+            # only a <tool_call>, stripping leaves empty string → blank panel.
+            # Show a dim placeholder so the user knows something is happening.
+            visible = _strip_model_headers(agent_answer)
+            live.update(_answer_panel(visible if visible else '[dim]…[/dim]'))
 
     return full_raw, agent_answer
 
@@ -135,7 +147,11 @@ def confirm_tool(name, args):
         border_style='yellow',
         padding=(0, 1),
     ))
-    choice = console.input('  [yellow][[1] Allow  [2] Skip  [3] Skip + feedback][/yellow] › ').strip()
+    # CHANGE 1d — same EOF guard as user_input(); default to skip (safe) on EOF
+    try:
+        choice = console.input('  [yellow][[1] Allow  [2] Skip  [3] Skip + feedback][/yellow] › ').strip()
+    except EOFError:
+        return False, None
     if choice == '1':
         return True, None
     if choice == '3':
@@ -162,7 +178,12 @@ def show_skipped(name):
 
 
 def user_input():
-    return console.input('\n[bold cyan]You[/bold cyan] › ')
+    # CHANGE 1c — EOFError is raised when stdin closes (Ctrl+D, piped input
+    # exhausted, terminal killed). Without this, the app crashes with a traceback.
+    try:
+        return console.input('\n[bold cyan]You[/bold cyan] › ')
+    except EOFError:
+        return 'exit'
 
 
 def show_token_count(used, max_tokens):

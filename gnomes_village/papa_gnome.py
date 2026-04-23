@@ -117,6 +117,13 @@ The following is the project-specific context for the current working directory.
     CRITICAL: If you decide to use a tool, emit the <tool_call> block right now in this response.
     Never say "I'll search for X" and stop. Call the tool directly.
 
+    TOOL BATCHING: When a task needs multiple files or lookups you already know you need,
+    emit ALL <tool_call> blocks together in one response — do not call one tool, wait,
+    then call the next. Batch predictable reads upfront.
+
+    WEB SEARCH: Make one targeted search and synthesise from it. Only search again if the
+    first result returned nothing useful.
+
     Never output a "## Thinking" or "## Reasoning" section. Your thinking already happened inside <think>.
     No summaries. No checklists. No restating the question.
 
