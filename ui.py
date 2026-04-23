@@ -38,7 +38,7 @@ def stream_turn(generator):
     """
     Stream a model turn with rich UI.
     Phase 1: spinner while thinking.
-    Phase 2: live-stream the answer into a panel.
+    Phase 2: live-stream the answer into a transient panel.
     Returns (full_raw, agent_answer).
     """
     full_raw = ''
@@ -47,7 +47,6 @@ def stream_turn(generator):
     agent_answer = ''
 
     # Phase 1 — thinking: spinner with live token count.
-    # Each chunk from stream_generate is ~1 token, so chunk count ≈ token count.
     think_tok = 0
     spinner = Spinner('dots', text='[dim]Thinking…[/dim]')
     with Live(
@@ -74,10 +73,7 @@ def stream_turn(generator):
             padding=(0, 1),
         ))
 
-    # Phase 2 — stream into a transient panel. Transient means it disappears when
-    # the context exits, so tool-only turns leave no persistent panel — just the
-    # compact tool summary that follows. For final-answer turns, main.py calls
-    # render_answer() to re-print the content as a persistent static panel.
+    # Phase 2 — stream into a transient panel.
     with Live(
         _answer_panel(Text('…', style='dim')),
         console=console,
@@ -91,6 +87,11 @@ def stream_turn(generator):
             live.update(_answer_panel(visible if visible else Text('…', style='dim')))
 
     return full_raw, agent_answer
+
+
+def clear_transient_residue():
+    """Erase the leftover transient answer panel before showing tool indicators."""
+    console.print()
 
 
 
@@ -199,16 +200,10 @@ def confirm_tool(name, args):
 
 
 def show_tool_result(name, result):
-    """Dim panel showing tool output — only in verbose mode."""
-    if not VERBOSE:
-        return
-    display = result if len(result) < 1500 else result[:1500] + '\n[dim]... truncated[/dim]'
-    console.print(Panel(
-        display,
-        title=f'[dim]↳ {name}[/dim]',
-        border_style='dim',
-        padding=(0, 1),
-    ))
+    """Compact one-liner shown immediately after a tool executes."""
+    hint = _result_hint(name, result)
+    hint_style = 'dim' if result.get('ok') else 'red'
+    console.print(f'  [dim]⚙[/dim]  [dim]{name}[/dim] [{hint_style}]({hint})[/{hint_style}]')
 
 
 def show_skipped(name):

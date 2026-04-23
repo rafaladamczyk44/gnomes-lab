@@ -41,12 +41,11 @@ def main():
 
             tool_calls = tool_call_extract(agent_answer)
             if not tool_calls:
-                # Final answer turn: show accumulated tool summary then render the answer panel
-                if tool_log:
-                    ui.show_tool_summary(tool_log)
                 ui.render_answer(agent_answer)
                 final_answer = agent_answer
                 break
+
+            ui.clear_transient_residue()
 
             for tool in tool_calls:
                 name = tool['name']
@@ -65,7 +64,7 @@ def main():
                 tool_res = tool_registry.dispatch(name, args)
                 tool_log.append((name, tool_res))
                 formatted = tool_registry.format_result(tool_res)
-                ui.show_tool_result(name, formatted)
+                ui.show_tool_result(name, tool_res)
                 messages.append({"role": "tool", "content": formatted})
 
         # CHANGE 2b — when MAX_TOOL_ITERATIONS is exhausted before a final answer,
