@@ -15,6 +15,29 @@ Or with an activated venv:
 source .venv/bin/activate && python main.py
 ```
 
+### Global `gnomes` command
+
+Install once, run from anywhere:
+
+```bash
+uv tool install .
+```
+
+This creates a `gnomes` executable in `~/.local/bin/`. After that:
+
+```bash
+cd ~/any/project
+gnomes               # starts the REPL from the current directory
+```
+
+**Updating after code changes:** `uv tool install` snapshots the code at install time. After editing source files, reinstall to pick up changes:
+
+```bash
+uv tool upgrade gnomes-lab .
+```
+
+For development, prefer `uv run main.py` — it uses the live source without reinstalling.
+
 ## Switching the model
 
 Models are configured in `config.py`. Change the path there to swap the primary or context-reducer model.

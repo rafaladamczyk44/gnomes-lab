@@ -177,4 +177,8 @@ uv sync                                      # install all dependencies
 uv run main.py                               # run via managed venv
 source .venv/bin/activate && python main.py  # or activate directly
 python conversion.py                         # convert + quantize model to local MLX
+uv tool install .                            # install global `gnomes` command
+uv tool upgrade gnomes-lab .                 # reinstall after code changes
 ```
+
+**Development workflow:** `uv tool install` creates a snapshot of the code. After editing files, run `uv tool upgrade gnomes-lab .` to update the installed version. For day-to-day development, use `uv run main.py` which reads live source.
