@@ -11,68 +11,73 @@ MAX_TOOL_ITERATIONS = 25
 REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'edit_file', 'web_search'}
 config = Config()
 
-# Load the model
-model, tokenizer = papa_gnome.summon_papa_gnome()
+def main():
+    # Load the model
+    model, tokenizer = papa_gnome.summon_papa_gnome()
 
-# Load the context
-global_context = load_global_context()
-context = load_context()
+    # Load the context
+    global_context = load_global_context()
+    context = load_context()
 
-# Load the UI
-ui.show_gnome_hut_demo()
-ui.startup(model_name=config.main_model)
+    # Load the UI
+    ui.show_gnome_hut_demo()
+    ui.startup(model_name=config.main_model)
 
-current_session_history = []
+    current_session_history = []
 
-while True:
-    query = ui.user_input()
+    while True:
+        query = ui.user_input()
 
-    if query.strip() == 'exit':
-        break
-
-    messages = build_messages(query, global_context, context, current_session_history)
-    final_answer = ''
-    tool_log = []  # accumulates ALL tools across every iteration for one compact summary
-
-    for _ in range(MAX_TOOL_ITERATIONS):
-        full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
-        messages.append({"role": "assistant", "content": full_raw})
-
-        tool_calls = tool_call_extract(agent_answer)
-        if not tool_calls:
-            # Final answer turn: show accumulated tool summary then render the answer panel
-            if tool_log:
-                ui.show_tool_summary(tool_log)
-            ui.render_answer(agent_answer)
-            final_answer = agent_answer
+        if query.strip() == 'exit':
             break
 
-        for tool in tool_calls:
-            name = tool['name']
-            args = tool['arguments']
+        messages = build_messages(query, global_context, context, current_session_history)
+        final_answer = ''
+        tool_log = []  # accumulates ALL tools across every iteration for one compact summary
 
-            if name in REQUIRE_APPROVAL:
-                approved, feedback = ui.confirm_tool(name, args)
-                if not approved:
-                    ui.show_skipped(name)
-                    skip_msg = f"Tool '{name}' was skipped by the user."
-                    if feedback:
-                        skip_msg += f" Reason: {feedback}"
-                    messages.append({"role": "tool", "content": skip_msg})
-                    continue
+        for _ in range(MAX_TOOL_ITERATIONS):
+            full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
+            messages.append({"role": "assistant", "content": full_raw})
 
-            tool_res = tool_registry.dispatch(name, args)
-            tool_log.append((name, tool_res))
-            formatted = tool_registry.format_result(tool_res)
-            ui.show_tool_result(name, formatted)
-            messages.append({"role": "tool", "content": formatted})
+            tool_calls = tool_call_extract(agent_answer)
+            if not tool_calls:
+                # Final answer turn: show accumulated tool summary then render the answer panel
+                if tool_log:
+                    ui.show_tool_summary(tool_log)
+                ui.render_answer(agent_answer)
+                final_answer = agent_answer
+                break
 
-    # CHANGE 2b — when MAX_TOOL_ITERATIONS is exhausted before a final answer,
-    # final_answer stays '' and the user only sees the token count. Show a message.
-    if not final_answer:
-        final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
-        ui.show_step_limit_warning()
+            for tool in tool_calls:
+                name = tool['name']
+                args = tool['arguments']
 
-    current_session_history.append({'user': query, 'agent': final_answer})
-    ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
-    ui.show_turn_divider()
+                if name in REQUIRE_APPROVAL:
+                    approved, feedback = ui.confirm_tool(name, args)
+                    if not approved:
+                        ui.show_skipped(name)
+                        skip_msg = f"Tool '{name}' was skipped by the user."
+                        if feedback:
+                            skip_msg += f" Reason: {feedback}"
+                        messages.append({"role": "tool", "content": skip_msg})
+                        continue
+
+                tool_res = tool_registry.dispatch(name, args)
+                tool_log.append((name, tool_res))
+                formatted = tool_registry.format_result(tool_res)
+                ui.show_tool_result(name, formatted)
+                messages.append({"role": "tool", "content": formatted})
+
+        # CHANGE 2b — when MAX_TOOL_ITERATIONS is exhausted before a final answer,
+        # final_answer stays '' and the user only sees the token count. Show a message.
+        if not final_answer:
+            final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
+            ui.show_step_limit_warning()
+
+        current_session_history.append({'user': query, 'agent': final_answer})
+        ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
+        ui.show_turn_divider()
+
+
+if __name__ == '__main__':
+    main()
