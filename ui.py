@@ -1,3 +1,4 @@
+import os
 import sys
 import re
 import difflib
@@ -6,24 +7,12 @@ from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
 from rich.spinner import Spinner
+from rich.table import Table
 
 console = Console()
 
-# --- Gnome Hut welcome ---
 def show_gnome_hut_demo():
-    console.print()
-    console.print('  [bold green]🏡 Gnome Hut[/bold green]')
-    console.print()
-    console.print('  Welcome to the Gnome Village!')
-    console.print()
-    console.print('  ⛺ The Hut ⛺')
-    console.print()
-    console.print('  [green]   /\\   [/green]')
-    console.print('  [green]  /  \\  [/green]')
-    console.print('  [green] | O O| [/green]')
-    console.print('  [green] |  U | [/green]')
-    console.print('  [green]  \\__/  [/green]')
-    console.print()
+    pass  # replaced by startup()
 
 VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
 
@@ -57,9 +46,12 @@ def stream_turn(generator):
     thinking_content = ''
     agent_answer = ''
 
-    # Phase 1 — thinking: show spinner, buffer until </think>
+    # Phase 1 — thinking: spinner with live token count.
+    # Each chunk from stream_generate is ~1 token, so chunk count ≈ token count.
+    think_tok = 0
+    spinner = Spinner('dots', text='[dim]Thinking…[/dim]')
     with Live(
-        Spinner('dots', text='[dim]Thinking...[/dim]'),
+        spinner,
         console=console,
         refresh_per_second=10,
         transient=True,
@@ -68,6 +60,8 @@ def stream_turn(generator):
             full_raw += chunk
             pending += chunk
             thinking_content += chunk
+            think_tok += 1
+            spinner.text = f'[dim]Thinking… ({think_tok} tok)[/dim]'
             if '</think>' in pending:
                 agent_answer = pending.split('</think>', 1)[1]
                 break
@@ -80,37 +74,81 @@ def stream_turn(generator):
             padding=(0, 1),
         ))
 
-    # Phase 2 — answer: live-stream remaining tokens into a panel
-    def _answer_panel(text):
-        return Panel(
-            Text(text),
-            title='[bold green]Papa Gnome[/bold green]',
-            border_style='green',
-            padding=(0, 1),
-            width=console.width,
-        )
-
+    # Phase 2 — stream into a transient panel. Transient means it disappears when
+    # the context exits, so tool-only turns leave no persistent panel — just the
+    # compact tool summary that follows. For final-answer turns, main.py calls
+    # render_answer() to re-print the content as a persistent static panel.
     with Live(
-        _answer_panel(''),
+        _answer_panel(Text('…', style='dim')),
         console=console,
         refresh_per_second=20,
+        transient=True,
     ) as live:
         for chunk in generator:
             full_raw += chunk
             agent_answer += chunk
-            # CHANGE 1b — when the model puts its plan inside <think> and emits
-            # only a <tool_call>, stripping leaves empty string → blank panel.
-            # Show a dim placeholder so the user knows something is happening.
             visible = _strip_model_headers(agent_answer)
-            live.update(_answer_panel(visible if visible else '[dim]…[/dim]'))
+            live.update(_answer_panel(visible if visible else Text('…', style='dim')))
 
     return full_raw, agent_answer
 
 
-def show_tool_auto(name, args):
-    """Dim one-liner for tools that run without approval."""
-    args_str = ', '.join(f'{k}={repr(v)}' for k, v in args.items())
-    console.print(f'  [dim]⚙  {name}({args_str})[/dim]')
+
+def _answer_panel(content):
+    """Build the Papa Gnome answer panel. Accepts str or Text."""
+    if isinstance(content, str):
+        content = Text(content)
+    return Panel(
+        content,
+        title='[bold green]Papa Gnome[/bold green]',
+        border_style='green',
+        padding=(0, 1),
+        width=console.width,
+    )
+
+
+def render_answer(agent_answer: str):
+    """Re-print the final answer as a persistent panel after the transient stream."""
+    visible = _strip_model_headers(agent_answer)
+    if visible:
+        console.print(_answer_panel(visible))
+
+
+def _result_hint(name: str, res: dict) -> str:
+    """One-word summary of a tool result for compact display."""
+    if not res.get('ok'):
+        return 'err'
+    r = res.get('result') or {}
+    if name == 'read_file':
+        return f"{r.get('lines', '?')}L"
+    if name == 'list_files':
+        return f"{r.get('count', '?')} files"
+    if name == 'grep_search':
+        return f"{r.get('count', '?')} hits"
+    if name == 'bash_exec':
+        return f"exit {r.get('exit_code', '?')}"
+    if name == 'web_search':
+        results = r if isinstance(r, list) else []
+        return f"{len(results)} results"
+    if name in ('edit_file', 'write_file'):
+        return 'saved'
+    return 'ok'
+
+
+def show_tool_summary(tool_log: list):
+    """Compact one-liner replacing separate per-tool messages.
+    Shows all tools executed in one model turn with brief result hints.
+    e.g.  ⚙  read_file (66L)  ·  list_files (14 files)  (2 tools)
+    """
+    parts = []
+    for name, res in tool_log:
+        hint = _result_hint(name, res)
+        hint_style = 'dim' if res.get('ok') else 'red'
+        parts.append(f'[dim]{name}[/dim] [{hint_style}]({hint})[/{hint_style}]')
+    joined = '  [dim]·[/dim]  '.join(parts)
+    n = len(tool_log)
+    suffix = f'  [dim]({n} tools)[/dim]' if n > 1 else ''
+    console.print(f'  [dim]⚙[/dim]  {joined}{suffix}')
 
 
 def _render_edit_diff(args) -> Text:
@@ -177,6 +215,22 @@ def show_skipped(name):
     console.print(f'  [dim]✗  {name} skipped[/dim]')
 
 
+def show_step_limit_warning():
+    """Amber panel shown when MAX_TOOL_ITERATIONS exhausts before a final answer."""
+    console.print(Panel(
+        '  Reached the step limit without a final answer.\n'
+        '  Try breaking the task into smaller, more focused questions.',
+        title='[yellow bold]⚠  Step limit[/yellow bold]',
+        border_style='yellow',
+        padding=(0, 1),
+    ))
+
+
+def show_turn_divider():
+    """Dim horizontal rule between conversation turns."""
+    console.rule(style='dim')
+
+
 def user_input():
     # CHANGE 1c — EOFError is raised when stdin closes (Ctrl+D, piped input
     # exhausted, terminal killed). Without this, the app crashes with a traceback.
@@ -187,12 +241,47 @@ def user_input():
 
 
 def show_token_count(used, max_tokens):
-    pct = used / max_tokens * 100
-    console.print(f'  [dim][{used/1000:.1f}k / {max_tokens/1000:.0f}k tokens — {pct:.0f}%][/dim]')
+    """Coloured bar: green → yellow → red as context fills."""
+    pct = used / max_tokens
+    bar_width = 18
+    filled = round(bar_width * pct)
+    empty = bar_width - filled
+    color = 'red' if pct >= 0.85 else 'yellow' if pct >= 0.6 else 'green'
+    bar = f'[{color}]{"█" * filled}[/{color}][dim]{"░" * empty}[/dim]'
+    console.print(f'  {bar} [dim]{used/1000:.1f}k / {max_tokens/1000:.0f}k ctx[/dim]')
 
 
-def startup(model_name):
-    console.print(f'  [bold green]Gnomes Village[/bold green]')
-    console.print(f'  [dim]model: {model_name}[/dim]')
-    console.print(f'  [dim]type "exit" to quit{" · --verbose for thinking" if not VERBOSE else " · thinking visible"}[/dim]')
+def startup(model_name: str):
+    """Claude Code-style header: gnome face on the left, info stacked on the right."""
+    short_model = model_name.split('/')[-1] if '/' in model_name else model_name
+    cwd = os.getcwd().replace(os.path.expanduser('~'), '~')
+
+    # Gnome face built line-by-line to preserve leading whitespace in table cells.
+    face = Text()
+    face.append("       /\\ \n", style="bold green")
+    face.append("      /  \\ \n", style="bold green")
+    face.append("     / ^^ \\ \n", style="bold green")
+    face.append("    | o  o | \n", style="green")
+    face.append("    |  \\/  | \n", style="green")
+    face.append("     \\ __ / \n", style="green")
+    face.append("     /~~~~\\ \n", style="green")
+    face.append("    / ~~~~ \\ \n", style="green")
+    face.append("   /~~~~~~~~\\", style="green")
+
+    info = Text.assemble(
+        ("Gnomes Lab\n", "bold green"),
+        (f"{short_model}\n", "dim"),
+        (f"{cwd}\n", "dim"),
+        ('type ', "dim"),
+        ('"exit"', "cyan"),
+        (' to quit', "dim"),
+    )
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(vertical='middle')
+    grid.add_column(vertical='middle')
+    grid.add_row(face, info)
+
+    console.print()
+    console.print(grid)
     console.print()
