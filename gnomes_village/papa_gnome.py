@@ -23,7 +23,19 @@ def summon_papa_gnome():
     return model, tokenizer
 
 
-def build_messages(user_question: str, session_history: list[dict]) -> list[dict]:
+def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict]) -> list[dict]:
+    """
+    Helper function to build the messages for the model.
+    It includes the system prompt, the user question, and the context.
+    Global context is read from ~/.gnomes/context.md (personal preferences).
+    Project context is read from the GNOMES.md file in the current directory.
+    :param user_question: Question from the traveler
+    :param global_context: Personal context from ~/.gnomes/context.md
+    :param context: Project context from the GNOMES.md file
+    :param session_history: Last 5 messages between the traveler and you
+    :return: Compiled messages for the model
+    """
+
     history_prompt = ""
     if session_history:
         recent = session_history[-5:]
@@ -35,6 +47,24 @@ def build_messages(user_question: str, session_history: list[dict]) -> list[dict
 
         Use the history to guide your thinking, especially with follow-up questions.
         """
+
+    global_context_prompt = ""
+    if global_context:
+        global_context_prompt = f"""
+## Personal Context
+The following are facts about the user and their preferences. These apply across all projects.
+
+{global_context}
+"""
+
+    context_prompt = ""
+    if context:
+        context_prompt = f"""
+## Project Context (GNOMES.md)
+The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
+
+{context}
+"""
 
     sys_prompt = f"""
     ## Identity:
@@ -91,11 +121,16 @@ def build_messages(user_question: str, session_history: list[dict]) -> list[dict
     No summaries. No checklists. No restating the question.
 
     You are free to add personal touch based on your identity.
+    
+    {global_context_prompt}
+
+    {context_prompt}
 
     {history_prompt}
 
     Following is the user question:
     """
+
 
     user_prompt = f"""
     Dear Papa Gnome,

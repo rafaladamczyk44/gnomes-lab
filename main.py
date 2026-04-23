@@ -2,54 +2,22 @@ from gnomes_village import papa_gnome
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages
 from toolz import tool_registry
 import ui
-import re
-import json
+from utils import tool_call_extract, load_context, load_global_context
 from config import Config
 
 MAX_TOOL_ITERATIONS = 10
 REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'edit_file', 'web_search'}
 config = Config()
 
-def _escape_control_chars(s):
-    """Escape literal control characters inside JSON string values."""
-    result = []
-    in_string = False
-    escape_next = False
-    for ch in s:
-        if escape_next:
-            result.append(ch)
-            escape_next = False
-        elif ch == '\\' and in_string:
-            result.append(ch)
-            escape_next = True
-        elif ch == '"':
-            result.append(ch)
-            in_string = not in_string
-        elif in_string and ord(ch) < 0x20:
-            if ch == '\n':
-                result.append('\\n')
-            elif ch == '\r':
-                result.append('\\r')
-            elif ch == '\t':
-                result.append('\\t')
-            else:
-                result.append(f'\\u{ord(ch):04x}')
-        else:
-            result.append(ch)
-    return ''.join(result)
-
-
-def tool_call_extract(text):
-    matches = re.findall(r'<tool_call>(.*?)</tool_call>', text, re.DOTALL)
-    if not matches:
-        return None
-    return [json.loads(_escape_control_chars(m.strip())) for m in matches]
-
-
+# Load the model
 model, tokenizer = papa_gnome.summon_papa_gnome()
-# --- Gnome Hut Demo Call (from Element 2 in ui.py) ---
-ui.show_gnome_hut_demo()
 
+# Load the context
+global_context = load_global_context()
+context = load_context()
+
+# Load the UI
+ui.show_gnome_hut_demo()
 ui.startup(model_name=config.main_model)
 
 current_session_history = []
@@ -60,7 +28,7 @@ while True:
     if query.strip() == 'exit':
         break
 
-    messages = build_messages(query, current_session_history)
+    messages = build_messages(query, global_context, context, current_session_history)
     final_answer = ''
 
     for _ in range(MAX_TOOL_ITERATIONS):
