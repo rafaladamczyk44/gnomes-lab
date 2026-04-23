@@ -2,7 +2,7 @@ from gnomes_village import papa_gnome
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages
 from toolz import tool_registry
 import ui
-from utils import tool_call_extract, load_context, load_global_context
+from utils import tool_call_extract, load_context, load_global_context, count_tokens
 from config import Config
 
 MAX_TOOL_ITERATIONS = 10
@@ -62,3 +62,4 @@ while True:
             messages.append({"role": "tool", "content": formatted})
 
     current_session_history.append({'user': query, 'agent': final_answer})
+    ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)

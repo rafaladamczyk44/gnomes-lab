@@ -165,6 +165,11 @@ def user_input():
     return console.input('\n[bold cyan]You[/bold cyan] › ')
 
 
+def show_token_count(used, max_tokens):
+    pct = used / max_tokens * 100
+    console.print(f'  [dim][{used/1000:.1f}k / {max_tokens/1000:.0f}k tokens — {pct:.0f}%][/dim]')
+
+
 def startup(model_name):
     console.print(f'  [bold green]Gnomes Village[/bold green]')
     console.print(f'  [dim]model: {model_name}[/dim]')

@@ -65,6 +65,11 @@ def tool_call_extract(text):
     return [json.loads(_escape_control_chars(m.strip())) for m in matches]
 
 
+def count_tokens(messages, tokenizer) -> int:
+    text = tokenizer.apply_chat_template(messages, tokenize=False)
+    return len(tokenizer.encode(text, add_special_tokens=False))
+
+
 def load_global_context() -> str:
     context_file = os.path.expanduser('~/.gnomes/context.md')
     if not os.path.exists(context_file):
