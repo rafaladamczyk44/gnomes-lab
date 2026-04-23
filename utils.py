@@ -38,7 +38,14 @@ def tool_call_extract(text):
     if not matches:
         return None
 
-    return [json.loads(_escape_control_chars(m.strip())) for m in matches]
+    calls = []
+    for m in matches:
+        cleaned = _escape_control_chars(m.strip())
+        try:
+            calls.append(json.loads(cleaned))
+        except json.JSONDecodeError:
+            pass
+    return calls if calls else None
 
 
 def count_tokens(messages, tokenizer) -> int:
