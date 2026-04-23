@@ -32,6 +32,7 @@ while True:
 
     messages = build_messages(query, global_context, context, current_session_history)
     final_answer = ''
+    tool_log = []  # accumulates ALL tools across every iteration for one compact summary
 
     for _ in range(MAX_TOOL_ITERATIONS):
         full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
@@ -39,6 +40,10 @@ while True:
 
         tool_calls = tool_call_extract(agent_answer)
         if not tool_calls:
+            # Final answer turn: show accumulated tool summary then render the answer panel
+            if tool_log:
+                ui.show_tool_summary(tool_log)
+            ui.render_answer(agent_answer)
             final_answer = agent_answer
             break
 
@@ -55,10 +60,9 @@ while True:
                         skip_msg += f" Reason: {feedback}"
                     messages.append({"role": "tool", "content": skip_msg})
                     continue
-            else:
-                ui.show_tool_auto(name, args)
 
             tool_res = tool_registry.dispatch(name, args)
+            tool_log.append((name, tool_res))
             formatted = tool_registry.format_result(tool_res)
             ui.show_tool_result(name, formatted)
             messages.append({"role": "tool", "content": formatted})
@@ -67,7 +71,8 @@ while True:
     # final_answer stays '' and the user only sees the token count. Show a message.
     if not final_answer:
         final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
-        ui.show_skipped('step-limit')
+        ui.show_step_limit_warning()
 
     current_session_history.append({'user': query, 'agent': final_answer})
     ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
+    ui.show_turn_divider()
