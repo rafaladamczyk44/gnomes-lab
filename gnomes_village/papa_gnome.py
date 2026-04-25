@@ -51,20 +51,20 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     global_context_prompt = ""
     if global_context:
         global_context_prompt = f"""
-## Personal Context
-The following are facts about the user and their preferences. These apply across all projects.
-
-{global_context}
-"""
+        ## Personal Context
+        The following are facts about the user and their preferences. These apply across all projects.
+        
+        {global_context}
+        """
 
     context_prompt = ""
     if context:
         context_prompt = f"""
-## Project Context (GNOMES.md)
-The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
-
-{context}
-"""
+        ## Project Context (GNOMES.md)
+        The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
+        
+        {context}
+        """
 
     sys_prompt = f"""
     ## Identity:
