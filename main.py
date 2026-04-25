@@ -1,6 +1,7 @@
 from gnomes_village import papa_gnome, mama_gnome
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages, _format_history_turn
 from toolz import tool_registry
+from toolz.tools import requires_approval
 import ui
 from utils import tool_call_extract, load_context, load_global_context, count_tokens
 from config import Config
@@ -8,14 +9,14 @@ from config import Config
 # CHANGE 2a — raised from 10; model emits 1 tool/turn so 10 = max 9 reads + answer.
 # Complex multi-file tasks were silently hitting the cap with no output.
 MAX_TOOL_ITERATIONS = 25
-REQUIRE_APPROVAL = {'bash_exec', 'write_file', 'edit_file', 'web_search'}
 
 # ---- Context management constants ----
 SESSION_HISTORY_WINDOW = 5          # Keep this many recent turns in prompt
+
 COMPACT_ALWAYS = {'web_search'}     # Always compact these tools
 COMPACT_THRESHOLDS = {              # Compact if token count exceeds this
-    'read_file': 600,
-    'bash_exec': 400,
+    'read_file': 1500,
+    'bash_exec': 800,
 }
 
 config = Config()
@@ -93,7 +94,6 @@ def main():
         if query.strip() == 'exit':
             break
 
-        # TODO: move to func
         if query.startswith('/'):
             cmd, *args = query[1:].split(maxsplit=1)
             match cmd:
@@ -174,7 +174,7 @@ def main():
                     name = tool['name']
                     args = tool['arguments']
 
-                    if name in REQUIRE_APPROVAL:
+                    if requires_approval(name, args):
                         approved, feedback = ui.confirm_tool(name, args)
                         if not approved:
                             ui.show_skipped(name)

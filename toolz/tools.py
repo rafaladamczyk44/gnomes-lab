@@ -8,6 +8,28 @@ from tavily import TavilyClient
 load_dotenv('.env')
 
 
+# ---- Approval policy ----
+# These tools ALWAYS require approval regardless of arguments.
+REQUIRE_APPROVAL = {"write_file", "edit_file", "web_search"}
+
+# bash_exec is special: auto-run by default, but requires approval if the
+# command matches any risky pattern (state-changing operations).
+_RISKY_BASH_PATTERNS = [
+    r"\brm\b",  # remove files
+    r"\bmv\b",  # move files
+    r"\bcp\b",  # copy files
+    r"\bchmod\b",
+    r"\bchown\b",  # permission changes
+    r"\bgit\s+(push|commit|merge|rebase|reset|checkout|cherry-pick|stash|tag)\b",
+    r"(>|>>)\s*(?!/dev/(?:null|stdout|stderr)\b)\S+",  # output redirection to actual files (not /dev/null)
+    r"\bdocker\s+(system\s+prune|rm|stop|kill|restart)\b",
+    r"\b(pip|npm|yarn|pnpm)\s+install\b",
+    r"\bpython[23]?\s+\S+\.py\b",  # running python scripts
+    r"\bcurl\s+.*\s+-o\b",
+    r"\bwget\s+.*\s+-O\b",
+]
+
+
 # Patterns blocked in bash_exec for safety
 _BLOCKED_PATTERNS = [
     r"rm\s+-rf\s+/",
@@ -17,6 +39,24 @@ _BLOCKED_PATTERNS = [
     r">\s*/dev/sd",
     r"chmod\s+-R\s+777\s+/",
 ]
+
+
+def is_risky_bash_exec(cmd: str) -> bool:
+    """Return True if a bash command modifies state and requires approval."""
+    for pattern in _RISKY_BASH_PATTERNS:
+        if re.search(pattern, cmd, re.IGNORECASE):
+            return True
+    return False
+
+
+def requires_approval(name: str, args: dict) -> bool:
+    """Determine whether a tool call requires user approval."""
+    if name in REQUIRE_APPROVAL:
+        return True
+    if name == "bash_exec":
+        return is_risky_bash_exec(args.get("cmd", ""))
+    return False
+
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 # CHANGE 3b — removed module-level TavilyClient(TAVILY_API_KEY) here.
