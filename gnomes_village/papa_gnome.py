@@ -23,7 +23,27 @@ def summon_papa_gnome():
     return model, tokenizer
 
 
-def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict]) -> list[dict]:
+def _format_history_turn(turn: dict) -> str:
+    """Format a single history turn including any tool calls for the system prompt."""
+    lines = [f"User: {turn['user']}", f"Assistant: {turn['agent']}"]
+    tools = turn.get('tools', [])
+    if tools:
+        parts = []
+        for t in tools:
+            # Show the tool call and a truncated result preview
+            args_short = ', '.join(f"{k}={v!r}" for k, v in t['args'].items())
+            res = t['result']
+            # Strip known [Tool: ...] prefix for cleaner display
+            if res.startswith('[Tool:'):
+                res = res.split('\n', 1)[1] if '\n' in res else ''
+            if len(res) > 120:
+                res = res[:117] + '...'
+            parts.append(f"{t['name']}({args_short}) → {res}")
+        lines.append(f"[Tools used: {'; '.join(parts)}]")
+    return '\n'.join(lines)
+
+
+def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict], session_summary: str = "") -> list[dict]:
     """
     Helper function to build the messages for the model.
     It includes the system prompt, the user question, and the context.
@@ -32,17 +52,26 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     :param user_question: Question from the traveler
     :param global_context: Personal context from ~/.gnomes/context.md
     :param context: Project context from the GNOMES.md file
-    :param session_history: Last 5 messages between the traveler and you
+    :param session_history: Last N messages between the traveler and you (typically 5)
+    :param session_summary: Compressed summary of older turns that no longer fit in the window
     :return: Compiled messages for the model
     """
+
+    summary_prompt = ""
+    if session_summary:
+        summary_prompt = f"""
+        ## Earlier session summary:
+        The following is a compressed summary of earlier turns in this session that are no longer in the recent window:
+        {session_summary.strip()}
+        """
 
     history_prompt = ""
     if session_history:
         recent = session_history[-5:]
-        formatted = "\n".join(f"User: {h['user']}\nAssistant: {h['agent']}" for h in recent)
+        formatted = "\n\n".join(_format_history_turn(h) for h in recent)
         history_prompt = f"""
         ## Current session history:
-        To know the context of the conversation, here is the window of the last 5 messages between the traveler and you:
+        To know the context of the conversation, here is the window of the last {len(recent)} messages between the traveler and you:
         {formatted}
 
         Use the history to guide your thinking, especially with follow-up questions.
@@ -132,6 +161,8 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     {global_context_prompt}
 
     {context_prompt}
+
+    {summary_prompt}
 
     {history_prompt}
 
