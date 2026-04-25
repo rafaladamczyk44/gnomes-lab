@@ -72,35 +72,35 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
         history_prompt = f"""
         ## Current session history:
         To know the context of the conversation, here is the window of the last {len(recent)} messages between the traveler and you.
-        The [Tools used] lines show what you already executed — you have those results. Do not re-run the same tools unless the user asks for fresh data.
+        The [Tools used] lines are a log of tools you called in prior turns — brief summaries only, not the full results. Those results are no longer in your active context. Read this history carefully to understand what was already explored and what the user knows. If you need the actual data from a prior turn to answer properly, re-run the relevant tool.
         {formatted}
 
         Use the history to guide your thinking, especially with follow-up questions.
         """
 
-    global_context_prompt = ""
-    if global_context:
-        global_context_prompt = f"""
-        ## Personal Context
-        The following are facts about the user and their preferences. These apply across all projects.
-        
-        {global_context}
-        """
-
-    context_prompt = ""
-    if context:
-        context_prompt = f"""
-        ## Project Context (GNOMES.md)
-        The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
-        
-        {context}
-        """
+    # global_context_prompt = ""
+    # if global_context:
+    #     global_context_prompt = f"""
+    #     ## Personal Context
+    #     The following are facts about the user and their preferences. These apply across all projects.
+    #
+    #     {global_context}
+    #     """
+    #
+    # context_prompt = ""
+    # if context:
+    #     context_prompt = f"""
+    #     ## Project Context (GNOMES.md)
+    #     The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
+    #
+    #     {context}
+    #     """
 
     sys_prompt = f"""
     ## Identity
     You are Papa Gnome — the eldest and most knowledgeable gnome in the village.
     As Papa Gnome, you are the ultimate authority on all matters.
-    Your village is located locally on a PC. You are a locally running open-source model: Qwen 3.5 distilled on responses of Claude Opus 4.6.
+    Your village is located locally on a PC. You are a locally running open-source model: {config.main_model}
     Your job is to answer the questions of any traveler who comes into your village, and to complete coding tasks independently.
 
     ## Guidelines
@@ -197,9 +197,9 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
 
     You are free to add a personal touch based on your identity.
     
-    {global_context_prompt}
-
-    {context_prompt}
+    Additional information (time and location):
+    - time: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+    - location: {os.getcwd()}
 
     {summary_prompt}
 
@@ -217,25 +217,6 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     In accordance with the guidelines above, your answer is:
     """
 
-
-    user_prompt = f"""
-    Dear Papa Gnome,
-    A traveler brings you a question:
-    {user_question}
-
-    Be mindful of the conversation histry provided above and the tools you have access to:                                   
-    - list_files: finding files by name/pattern → NOT bash find
-    - grep_search: searching file contents → NOT bash grep/cat                                           
-    - read_file: reading a file → NOT bash cat/head/tail                                                 
-    - edit_file: modifying a file → NOT bash sed/awk, NOT write_file                                     
-    - write_file: creating new files only, NOT for edits                                                 
-    - web_search: anything requiring current/external knowledge                                          
-    - bash_exec: LAST RESORT — only when no other tool fits 
-    
-    
-    In accordance with the guidelines above, your answer is:
-    """
-
     return [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user_prompt},
@@ -248,6 +229,7 @@ def papa_gnome_answers(model, tokenizer, messages: list[dict]):
         tokenize=False,
         tools=tool_registry.TOOL_SCHEMAS,
         add_generation_prompt=True,
+        enable_thinking=True,
     )
 
     for token in stream_generate(
