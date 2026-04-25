@@ -65,12 +65,15 @@ def load_global_context() -> str:
 
 
 def load_context() -> str:
-    context_file = os.path.join(os.getcwd(), 'GNOMES.md')
-    if not os.path.exists(context_file):
-        return ""
+    cwd = os.getcwd()
+    for filename in ('GNOMES.md', 'CLAUDE.md', 'AGENTS.md'):
+        context_file = os.path.join(cwd, filename)
+        if os.path.exists(context_file):
+            try:
+                with open(context_file, "r", encoding="utf-8") as f:
+                    return f.read().strip()
+            except (OSError, UnicodeDecodeError):
+                continue
+    return ""
 
-    try:
-        with open(context_file, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except (OSError, UnicodeDecodeError):
-        return ""
+
