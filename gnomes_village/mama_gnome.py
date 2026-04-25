@@ -6,66 +6,35 @@ model_repo = 'mlx-community/Qwen3-4B-Instruct-2507-mxfp4'
 
 def summon_mana_gnome():
     model, tokenizer = mlx_load(model_repo)
-    print("Summoned Mama Gnome")
     return model, tokenizer
 
 
-def router(model, tokenizer, user_input: str) -> str:
+def summarize(model, tokenizer, chat_history: str) -> str:
 
     sys_prompt = """
-    You are Mama Gnome — the wisest gnome in the village and a master planner.
-    A traveler brings you a question. Your job is to analyze it and decide how to answer it.
-    You have two small gnomes available to help: one that thinks carefully step-by-step, one that answers quickly and directly.
+    You are a context compression assistant. Your job is to turn a chat history into a dense, actionable summary.
 
-    Choose exactly one strategy:
+    Rules:
+    - One to three sentences maximum.
+    - Preserve specific facts: file paths, commands, numbers, URLs, outcomes.
+    - Preserve user decisions, preferences, and pivots (e.g., "user changed mind from X to Y").
+    - Drop noise: pleasantries, repetitive tool outputs, failed attempts that were abandoned.
+    - Use precise, terse language. No fluff.
 
-    STRATEGY A — answer yourself:
-      Use when the question is simple, factual, or common knowledge and you are fully confident.
-      You answer directly. Small gnomes are not needed.
+    Examples of good summaries:
 
-    STRATEGY B — decompose:
-      Use when the question is complex and benefits from splitting into two complementary sub-tasks.
-      - task_think: a sub-task requiring careful step-by-step reasoning (for the thinking gnome)
-      - task_direct: a sub-task requiring a concise, direct answer (for the direct gnome)
+    Example 1 (coding / bug fix):
+    The user initially asked to refactor tool_registry.py for async dispatch, but pivoted to fixing a JSON parsing bug in papa_gnome.py where tool arguments containing literal newlines broke tool_call_extract(). A regex sanitiser was added and verified working.
 
-    STRATEGY C — parallel:
-      Use when the question is open-ended, creative, or ambiguous and benefits from two independent attempts.
-      Both gnomes receive the exact same task and work independently.
+    Example 2 (web research + local config):
+    Researched Vietnam travel: 45-day visa-free entry for Polish citizens saved to ~/.gnomes/memory/travel.md, Hanoi December weather is dry season at 18-22C. Verified ffmpeg v6.1 is installed locally.
 
-    OUTPUT RULES — strictly follow these:
-    - Output ONLY a single raw JSON object. No markdown, no code fences, no explanation.
-    - The JSON must always contain all five fields listed below.
-    - For strategy A: fill the "answer" field with your response, set task_think and task_direct to null.
-    - For strategy B or C: set answer to null, fill task_think and task_direct with clear task strings.
-    - The rationale must be one short sentence.
-    - Small gnomes will not see the user question, it is your task to direct them with a clearly specified tasks on what they are supposed to do when outputting tasks for models 
-    - Do not limit small gnomes with max length - do not give instructions like "one-sentence answer"
-    
-    **Invoking papa gnome**:
-    If you find the task to be extremally difficult and outside of capabilites of you and smaller models,
-    You will have a possibility of invoking the biggest model - papa gnome.
-    It is a very heavy operation compute-wise therefore needs to be only called when really needed, for example in:
-        - coding questions,
-        - multi step complex reasoning
-        - open-ended, tricky and ambiguous questions
-    The rest of the process follows according to instructions, just set the big_gnome_needed flag to true if needed.
-    
-    JSON schema (output this exact structure, with no surrounding fences or text):
-    {
-      "strategy": "A or B or C",
-      "answer": "your direct answer, or null",
-      "task_think": "reasoning sub-task for the thinking gnome - clear instruction for reasoning model of what the model is supposed to do, or null",
-      "task_direct": "direct sub-task for the fast gnome - clear instruction on what the model is supposed to do, or null",
-      "big_gnome_needed": True if the task is very difficult and required big papa gnome to take a look at it, false otherwise
-      "rationale": "one sentence explaining your strategy choice"
-    }
+    Example 3 (system maintenance):
+    Cleaned up Docker images (freed 12GB), identified 3 large repos in ~/projects and archived two to external drive via tar. User preference noted: backups should go to /Volumes/Backup/ rather than Desktop.
     """
 
-    user_prompt = f"""
-    Question from the traveler:
-    {user_input}
-
-    Analyze the question, choose a strategy, then output the JSON object.
+    user_prompt = f"""Summarize the following chat history:
+    {chat_history}
     """
 
     messages = [
@@ -86,49 +55,82 @@ def router(model, tokenizer, user_input: str) -> str:
         prompt=prompt,
         max_tokens=1024,
         verbose=False,
-        sampler=make_sampler(temp=0.5, top_p=0.95, min_p=0.05, top_k=20),
-        logits_processors=make_logits_processors(repetition_penalty=1.5),
+        sampler=make_sampler(temp=0.3, top_p=0.95, min_p=0.05, top_k=20),
+        # logits_processors=make_logits_processors(repetition_penalty=1.5),
     )
 
     return response
 
 
-def synthesize(model, tokenizer, thinking_gnome, direct_gnome, initial_plan,
-               user_question: str, papa_gnome: str = None) -> str:
-    papa_instruction = (
-        "Papa Gnome — the eldest and most knowledgeable gnome — was also called in for this question. "
-        "His response carries the most weight: treat it as the authoritative expert input and prioritise it "
-        "when it conflicts with the smaller gnomes."
-        if papa_gnome else
-        "Two small gnomes worked on this question."
-    )
+def compact_tool_output(model, tokenizer, tool_output: str) -> str:
+    sys_prompt = """
+    You are a tool output compressor. Your job is to take long tool output and compress it into the minimum number of tokens while keeping every fact the downstream agent needs to act.
 
-    sys_prompt = f"""
-    You are Mama Gnome — the wisest gnome in the village and a master planner.
-    {papa_instruction}
-    Your job now is to synthesize all gnome responses into a single, clear, final answer for the traveler.
-    Each gnome ends their response with a confidence score (1-10) — use it to weigh their answers: higher confidence means more reliable input. (Do not output the final confidence, only use it to consider and weight answer)
+    Rules:
+    - Preserve all specific facts: numbers, dates, file paths, URLs, error messages, return codes.
+    - Preserve code structure if the output is code: keep function signatures, key lines, indentation.
+    - Strip boilerplate: HTML tags, ads, navigation, repeated headers, copyright notices, markdown formatting noise.
+    - Collapse lists: if a search returns 10 similar results, keep the 2-3 most relevant and note the count.
+    - For errors: keep the error type and the key line; drop the stack trace unless it contains unique info.
+    - Output ONLY the compressed text. No meta commentary like "Here is the summary:".
+    - Be aggressive: cut 80% of tokens if possible without losing actionable information.
 
-    Resolve any gaps or disagreements and produce the best possible final answer.
-    Only output the final answer, no explanation or meta-commentary, no rationale behind the confidence
+    Examples:
+
+    Example 1 — web_search (before):
+    [Tool: web_search]
+    1. Title: "Python 3.12 Release Notes"
+    URL: https://docs.python.org/3.12/whatsnew/...
+    Snippet: "The latest version of Python includes improvements to the interpreter, faster startup times, and better error messages. In this article we will explore... Posted on 2023-10-02 by the Python Software Foundation. Read more..."
+    2. Title: "What's New In Python 3.12"
+    URL: https://...
+    Snippet: "Python 3.12 introduces PEP 701 for f-strings, PEP 684 for isolated subinterpreters, and PEP 669 for low-cost debugging. This release also..."
+    [5 more results]
+
+    Example 1 — web_search (after):
+    Python 3.12 (2023-10-02): PEP 701 f-strings, PEP 684 isolated subinterpreters, PEP 669 low-cost debugging. Faster startup, better error messages.
+
+    Example 2 — read_file (before):
+    [Tool: read_file — main.py]
+    import os
+    import sys
+    # This is the main entry point for the application.
+    # It handles argument parsing and sets up the logging.
+    def main():
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--verbose", action="store_true")
+        args = parser.parse_args()
+        if args.verbose:
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
+        run()
+    if __name__ == "__main__":
+        main()
+
+    Example 2 — read_file (after):
+    [Tool: read_file — main.py]
+    import os, sys
+    def main(): parses --verbose, sets logging level, calls run()
+
+    Example 3 — bash_exec (before):
+    [Tool: bash_exec]
+    total 128
+    drwxr-xr-x  12 rafal  staff   384 Apr 10 09:23 .
+    drwxr-xr-x  45 rafal  staff  1440 Apr 10 09:20 ..
+    -rw-r--r--   1 rafal  staff  2048 Apr 10 09:22 README.md
+    -rw-r--r--   1 rafal  staff   512 Apr 10 09:21 main.py
+    -rw-r--r--   1 rafal  staff  1024 Apr 10 09:21 config.py
+    -rw-r--r--   1 rafal  staff  2048 Apr 10 09:21 requirements.txt
+
+    Example 3 — bash_exec (after):
+    [Tool: bash_exec]
+    Files: README.md (2KB), main.py (512B), config.py (1KB), requirements.txt (2KB). Total 4 files, 128B dir.
     """
 
-    papa_section = f"\n    Papa Gnome's response:\n    {papa_gnome}\n" if papa_gnome else ""
+    user_prompt = f"""Compress the following tool output:
 
-    user_prompt = f"""
-    The traveler's original question:
-    {user_question}
-
-    Your routing plan:
-    {initial_plan}
-
-    Thinking Gnome's response:
-    {thinking_gnome}
-
-    Direct Gnome's response:
-    {direct_gnome}
-{papa_section}
-    Based on the above, write a clear and complete final answer for the traveler.
+    {tool_output}
     """
 
     messages = [
@@ -136,21 +138,20 @@ def synthesize(model, tokenizer, thinking_gnome, direct_gnome, initial_plan,
         {"role": "user", "content": user_prompt},
     ]
 
-    formatted_prompt = tokenizer.apply_chat_template(
+    prompt = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=True,
-        enable_thinking=True,
+        enable_thinking=False,
     )
 
     response = generate(
         model,
         tokenizer,
-        prompt=formatted_prompt,
-        max_tokens=2048,
+        prompt=prompt,
+        max_tokens=1024,
         verbose=False,
-        sampler=make_sampler(temp=0.7, top_p=0.95, min_p=0.05, top_k=20),
-        logits_processors=make_logits_processors(repetition_penalty=1.3),
+        sampler=make_sampler(temp=0.2, top_p=0.95, min_p=0.05, top_k=20),
     )
 
     return response
