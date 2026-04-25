@@ -160,7 +160,7 @@ def main():
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
                 full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
-                messages.append({"role": "assistant", "content": full_raw})
+                messages.append({"role": "assistant", "content": agent_answer})
 
                 tool_calls = tool_call_extract(agent_answer)
                 if not tool_calls:
