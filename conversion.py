@@ -3,11 +3,17 @@ from huggingface_hub import HfApi
 import os
 
 # https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2
-HF_REPO = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
-OUTPUT_PATH = "./models/Qwen3.5-9B-reasoning-4bit"
-REPO_NAME = "Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"
+# HF_REPO = "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2"
+# OUTPUT_PATH = "./models/Qwen3.5-9B-reasoning-4bit"
+# REPO_NAME = "Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"
 
-README = """---
+HF_REPO = "Qwen/Qwen3.5-9B"
+OUTPUT_PATH = "./models/Qwen3.5-9B-4bit"
+REPO_NAME = "Qwen3.5-9B-MLX-4bit"
+
+
+
+README = f"""---
 license: apache-2.0
 base_model: Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2
 tags:
@@ -17,9 +23,9 @@ tags:
   - reasoning
 ---
 
-# Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit
+# {REPO_NAME}
 
-4-bit MLX quantization of [Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
+4-bit MLX quantization of {REPO_NAME}
 
 ## Conversion
 Quantized using `mlx_lm.convert` with 4-bit quantization (q_bits=4, q_group_size=64)
@@ -28,25 +34,25 @@ Quantized using `mlx_lm.convert` with 4-bit quantization (q_bits=4, q_group_size
 ```python
 from mlx_lm import load, generate
 
-model, tokenizer = load("{username}/{repo_name}")
+model, tokenizer = load("username/repo_name")
 response = generate(model, tokenizer, prompt="Hello!", verbose=True)
 ```
 
 ## Original Model
-See [Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2](https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2) for full details.
+See {HF_REPO} for full details.
 
 ## License
 Apache 2.0 (inherited from original)
 """
 
-# convert(
-#     hf_path=HF_REPO,
-#     mlx_path=OUTPUT_PATH,
-#     quantize=True,
-#     q_bits=4,
-#     q_group_size=64,
-# )
-# print(f"Done. MLX model saved to: {OUTPUT_PATH}")
+convert(
+    hf_path=HF_REPO,
+    mlx_path=OUTPUT_PATH,
+    quantize=True,
+    q_bits=4,
+    q_group_size=64,
+)
+print(f"Done. MLX model saved to: {OUTPUT_PATH}")
 
 # Upload to HuggingFace
 api = HfApi()
