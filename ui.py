@@ -285,3 +285,67 @@ def startup(model_name: str):
 def info(message: str):
     """Dim status line for slash command feedback."""
     console.print(f'  [dim]ℹ {message}[/dim]')
+
+
+def show_history(history: list, n: int = 5):
+    """Display recent session history entries."""
+    total = len(history)
+    if total == 0:
+        info('No history yet.')
+        return
+    recent = history[-n:] if n < total else history
+    console.print()
+    for i, turn in enumerate(recent, start=total - len(recent) + 1):
+        console.print(f'  [bold cyan]Turn {i}[/bold cyan]')
+        user_line = turn['user'][:120] + '…' if len(turn['user']) > 120 else turn['user']
+        console.print(f'    [dim]You:[/dim] {user_line}')
+        agent_line = turn['agent'][:120] + '…' if len(turn['agent']) > 120 else turn['agent']
+        console.print(f'    [dim]Papa:[/dim] {agent_line}')
+        tools = turn.get('tools', [])
+        if tools:
+            tool_names = [f"[dim]{t['name']}[/dim]" for t in tools]
+            console.print(f'    [dim]Tools:[/dim] {', '.join(tool_names)}')
+    console.print(f'  [dim](showing {len(recent)} / {total} turns)[/dim]')
+    console.print()
+
+
+def show_tools():
+    """Display available tools in a tidy panel."""
+    tool_descriptions = [
+        ('list_files', 'glob pattern → matching file paths'),
+        ('grep_search', 'regex pattern + path → matching lines'),
+        ('read_file', 'path + optional offset/length → file contents'),
+        ('edit_file', 'path + old_string + new_string → in-place edit'),
+        ('write_file', 'path + content → create/overwrite file'),
+        ('web_search', 'query → search results via Tavily'),
+        ('bash_exec', 'shell command → stdout/stderr (LAST RESORT)'),
+    ]
+    t = Text()
+    for name, desc in tool_descriptions:
+        t.append(f'  {name:12} ', style='bold cyan')
+        t.append(f'{desc}\n', style='dim')
+    console.print(Panel(
+        t,
+        title='[bold]Available Tools[/bold]',
+        border_style='dim',
+        padding=(0, 1),
+    ))
+
+
+def show_model(model_name: str, small_model: str):
+    """Display current model configuration."""
+    short_main = model_name.split('/')[-1] if '/' in model_name else model_name
+    short_small = small_model.split('/')[-1] if '/' in small_model else small_model
+    console.print(Panel(
+        f'  [bold]Papa Gnome[/bold]  {short_main}\n'
+        f'  [bold]Mama Gnome[/bold] {short_small}',
+        title='[bold]Models[/bold]',
+        border_style='dim',
+        padding=(0, 1),
+    ))
+
+
+def show_interrupted():
+    """Clean feedback when generation is cancelled mid-stream."""
+    console.print(f'  [yellow]⚡ Generation interrupted.[/yellow]')
+    console.print()
