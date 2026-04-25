@@ -280,3 +280,8 @@ def startup(model_name: str):
     console.print()
     console.print(grid)
     console.print()
+
+
+def info(message: str):
+    """Dim status line for slash command feedback."""
+    console.print(f'  [dim]ℹ {message}[/dim]')
