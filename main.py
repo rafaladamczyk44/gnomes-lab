@@ -1,5 +1,6 @@
 from gnomes_village import papa_gnome, mama_gnome
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages, _format_history_turn
+from gnomes_village.coding_gnome import summon_coding_gnome, invoke_coding_gnome
 from toolz import tool_registry
 from toolz.tools import requires_approval
 import ui
@@ -75,6 +76,10 @@ def main():
 
     # For summarizing and tool output compacting
     help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
+
+    # coding gnome
+    coding_model = None
+    coding_tokenizer = None
 
     # Load the context
     global_context = load_global_context()
@@ -174,6 +179,26 @@ def main():
                     name = tool['name']
                     args = tool['arguments']
 
+                    # special case for coding tasks
+                    if name == 'coding_gnome':
+                        coding_context = args.get('context', '')
+                        code_sketch = args.get('code_sketch', '')
+
+                        ui.info('Invoking coding gnome...')
+
+                        if coding_model is None:
+                            coding_model, coding_tokenizer = summon_coding_gnome()
+
+                        corrected_code_sketch = invoke_coding_gnome(coding_model, coding_tokenizer, coding_context, code_sketch)
+                        ui.show_tool_result(name, {"tool": name, "ok": True, "result": corrected_code_sketch, "error": None})
+
+                        # Feed result back to Papa for review
+                        formatted = f"[coding_gnome result]\n\n{corrected_code_sketch}"
+                        messages.append({"role": "tool", "content": formatted})
+                        tool_log.append({'name': name, 'args': args, 'result': formatted})
+
+                        continue
+
                     if requires_approval(name, args):
                         approved, feedback = ui.confirm_tool(name, args)
                         if not approved:
@@ -191,6 +216,7 @@ def main():
                     ui.show_tool_result(name, tool_res)
                     messages.append({"role": "tool", "content": formatted})
                     tool_log.append({'name': name, 'args': args, 'result': formatted})
+
         except KeyboardInterrupt:
             ui.show_interrupted()
             interrupted = True
@@ -201,12 +227,14 @@ def main():
             final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
             ui.show_step_limit_warning()
 
-        if not interrupted:
-            current_session_history.append({'user': query, 'agent': final_answer, 'tools': tool_log})
-            current_session_history, session_summary = _update_session_summary(
-                current_session_history, session_summary, help_model, help_tokenizer
-            )
+        # Always save to history (even interrupted turns) so follow-up questions have context.
+        agent_record = final_answer if final_answer else '[interrupted]'
+        current_session_history.append({'user': query, 'agent': agent_record, 'tools': tool_log})
+        current_session_history, session_summary = _update_session_summary(
+            current_session_history, session_summary, help_model, help_tokenizer
+        )
 
+        if not interrupted:
             # show token count and divider
             ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
             ui.show_turn_divider()
