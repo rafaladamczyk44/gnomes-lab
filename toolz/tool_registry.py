@@ -1,4 +1,4 @@
-from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search, coding_gnome
+from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search
 
 # Compact schema fed into the model's system prompt
 TOOL_SCHEMAS = [
@@ -108,21 +108,6 @@ TOOL_SCHEMAS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "coding_gnome",
-            "description": "Invoke the coding gnome to help you with coding tasks.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "context": {"type": "string", "description": "Contextual information about the problem"},
-                    "code_sketch": {"type": "string", "description": "Initial code sketch"},
-                },
-                "required": ["context", "code_sketch"],
-            }
-        }
-    }
 ]
 
 _DISPATCH = {
@@ -133,7 +118,6 @@ _DISPATCH = {
     "grep_search": grep_search,
     "web_search": web_search,
     "bash_exec": bash_exec,
-    "coding_gnome": coding_gnome,
 }
 
 

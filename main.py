@@ -1,85 +1,67 @@
 from gnomes_village import papa_gnome, mama_gnome
+import mlx.core as mx
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages, _format_history_turn
-from gnomes_village.coding_gnome import summon_coding_gnome, invoke_coding_gnome
 from toolz import tool_registry
 from toolz.tools import requires_approval
 import ui
 from utils import tool_call_extract, load_context, load_global_context, count_tokens
 from config import Config
 
-# CHANGE 2a — raised from 10; model emits 1 tool/turn so 10 = max 9 reads + answer.
-# Complex multi-file tasks were silently hitting the cap with no output.
 MAX_TOOL_ITERATIONS = 25
 
 # ---- Context management constants ----
 SESSION_HISTORY_WINDOW = 5          # Keep this many recent turns in prompt
 
-COMPACT_ALWAYS = {'web_search'}     # Always compact these tools
-COMPACT_THRESHOLDS = {              # Compact if token count exceeds this
-    'read_file': 1500,
-    'bash_exec': 800,
+COMPACT_CHAR_LIMITS = {
+    'read_file': 6000,
+    'bash_exec': 3000,
 }
 
 config = Config()
 
 
-def _compact_if_needed(formatted: str, tool_name: str, help_model, help_tokenizer, tokenizer) -> str:
-    """Compact tool output if it exceeds threshold. Returns (possibly compacted) string."""
-    if tool_name in COMPACT_ALWAYS:
-        should_compact = True
-    else:
-        threshold = COMPACT_THRESHOLDS.get(tool_name, float('inf'))
-        tokens = len(tokenizer.encode(formatted, add_special_tokens=False))
-        should_compact = tokens > threshold
-
-    if not should_compact:
-        return formatted
-
-    try:
-        ui.info(f"Compacting {tool_name} output...")
-        compacted = mama_gnome.compact_tool_output(help_model, help_tokenizer, formatted)
-        if compacted and compacted.strip():
-            return f"[Tool: {tool_name}] COMPACTED:\n{compacted.strip()}"
-    except Exception as e:
-        ui.info(f"Compaction failed for {tool_name}: {e}")
+def _compact_if_needed(formatted: str, tool_name: str) -> str:
+    """Truncate tool output if it exceeds character limit."""
+    limit = COMPACT_CHAR_LIMITS.get(tool_name)
+    if limit and len(formatted) > limit:
+        return formatted[:limit] + f'\n... [truncated at {limit} chars]'
     return formatted
 
 
-def _update_session_summary(history: list, summary: str, help_model, help_tokenizer) -> tuple[list, str]:
-    """Summarize oldest turns when history exceeds window. Returns (trimmed history, updated summary)."""
+def _update_session_summary(history: list, summary: str, help_model, help_tokenizer) -> tuple[list, str, object, object]:
+    """Summarize oldest turns when history exceeds window. Lazy-loads and offloads Mama Gnome."""
     if len(history) <= SESSION_HISTORY_WINDOW:
-        return history, summary
+        return history, summary, help_model, help_tokenizer
 
     turns_to_summarize = history[:-SESSION_HISTORY_WINDOW]
     remaining_history = history[-SESSION_HISTORY_WINDOW:]
-
     chat_text = "\n\n".join(_format_history_turn(turn) for turn in turns_to_summarize)
 
+    if help_model is None:
+        ui.info("Loading summarizer...")
+        help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
+
+    updated_summary = summary
     try:
         ui.info("Summarizing older session turns...")
         new_summary = mama_gnome.summarize(help_model, help_tokenizer, chat_text)
         if new_summary and new_summary.strip():
-            if summary:
-                updated_summary = f"{summary.strip()}\n{new_summary.strip()}"
-            else:
-                updated_summary = new_summary.strip()
-            return remaining_history, updated_summary
+            updated_summary = f"{summary.strip()}\n{new_summary.strip()}" if summary else new_summary.strip()
     except Exception as e:
         ui.info(f"Session summarization failed: {e}")
 
-    return remaining_history, summary
+    del help_model, help_tokenizer
+    mx.metal.clear_cache()
+
+    return remaining_history, updated_summary, None, None
 
 
 def main():
     # Load the model
     model, tokenizer = papa_gnome.summon_papa_gnome()
 
-    # For summarizing and tool output compacting
-    help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
-
-    # coding gnome
-    coding_model = None
-    coding_tokenizer = None
+    help_model = None
+    help_tokenizer = None
 
     # Load the context
     global_context = load_global_context()
@@ -112,6 +94,9 @@ def main():
                         chat_text = "\n\n".join(_format_history_turn(turn) for turn in current_session_history)
                         try:
                             ui.info("Compacting session...")
+                            if help_model is None:
+                                ui.info("Loading summarizer...")
+                                help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
                             full_summary = mama_gnome.summarize(help_model, help_tokenizer, chat_text)
                             if full_summary and full_summary.strip():
                                 if session_summary:
@@ -122,6 +107,10 @@ def main():
                             ui.info('Session compacted. History cleared, summary preserved.')
                         except Exception as e:
                             ui.info(f"Compaction failed: {e}")
+                        finally:
+                            del help_model, help_tokenizer
+                            mx.metal.clear_cache()
+                            help_model, help_tokenizer = None, None
                     else:
                         ui.info("No history to compact.")
                     continue
@@ -179,32 +168,6 @@ def main():
                     name = tool['name']
                     args = tool['arguments']
 
-                    # special case for coding tasks
-                    if name == 'coding_gnome':
-                        coding_context = args.get('context', '')
-                        code_sketch = args.get('code_sketch', '')
-
-                        if ui.DEBUG:
-                            ui.show_tool_call(name, args)
-
-                        ui.info('Invoking coding gnome...')
-
-                        if coding_model is None:
-                            coding_model, coding_tokenizer = summon_coding_gnome()
-
-                        corrected_code_sketch = invoke_coding_gnome(coding_model, coding_tokenizer, coding_context, code_sketch)
-                        tool_res = {"tool": name, "ok": True, "result": corrected_code_sketch, "error": None}
-                        ui.show_tool_result(name, tool_res)
-                        if ui.DEBUG:
-                            ui.show_tool_result_debug(name, tool_res)
-
-                        # Feed result back to Papa for review
-                        formatted = f"[coding_gnome result]\n\n{corrected_code_sketch}"
-                        messages.append({"role": "tool", "content": formatted})
-                        tool_log.append({'name': name, 'args': args, 'result': formatted})
-
-                        continue
-
                     if ui.DEBUG:
                         ui.show_tool_call(name, args)
 
@@ -221,7 +184,7 @@ def main():
 
                     tool_res = tool_registry.dispatch(name, args)
                     formatted = tool_registry.format_result(tool_res)
-                    formatted = _compact_if_needed(formatted, name, help_model, help_tokenizer, tokenizer)
+                    formatted = _compact_if_needed(formatted, name)
                     ui.show_tool_result(name, tool_res)
                     if ui.DEBUG:
                         ui.show_tool_result_debug(name, tool_res)
@@ -241,7 +204,7 @@ def main():
         # Always save to history (even interrupted turns) so follow-up questions have context.
         agent_record = final_answer if final_answer else '[interrupted]'
         current_session_history.append({'user': query, 'agent': agent_record, 'tools': tool_log})
-        current_session_history, session_summary = _update_session_summary(
+        current_session_history, session_summary, help_model, help_tokenizer = _update_session_summary(
             current_session_history, session_summary, help_model, help_tokenizer
         )
 

@@ -223,7 +223,3 @@ def edit_file(path: str, old_string: str, new_string: str) -> dict:
         return {"tool": "edit_file", "ok": True, "result": {"path": str(p)}, "error": None}
     except Exception as e:
         return {"tool": "edit_file", "ok": False, "result": None, "error": str(e)}
-
-
-def coding_gnome(context, code_sketch):
-    return context, code_sketch

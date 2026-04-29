@@ -121,15 +121,7 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     - edit_file — modify existing files
     - write_file — new files only
     - web_search — external/current knowledge; one targeted search, synthesize from it
-    - coding_gnome — specialist for writing code; always use for code tasks
     - bash_exec — last resort only
-    
-    ## Coding Tasks
-    **Always** when you are asked to write a code:
-    1. Reason about the solution; write a sketch.
-    2. Call coding_gnome with `context` (problem description) and `code_sketch` (your draft).
-    3. Review the returned code. Use it if good; improve it yourself if not.
-    You want to delive the highest quality code possible so support from coding gnome is essential.
 
     ## Output Format
 
@@ -142,13 +134,31 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     - step 1
     <tool_call>...</tool_call>
 
-    CASE 3 — Code request (user asks to write, fix, or implement code):
-    ## Plan
-    - brief sketch of the approach
-    <tool_call>{{"name": "coding_gnome", "arguments": {{"context": "<what to solve>", "code_sketch": "<your code draft>"}}}}</tool_call>
+    CASE 3a — Write or edit a file (user asks to implement, create, or fix code in a file):
+    **MANDATORY:** Before calling write_file or edit_file with code, you MUST output ## Sketch then ## Review in this same response. A tool call without a preceding ## Sketch + ## Review is a format violation.
 
-    CASE 3 is mandatory for any code request. Writing code inline or directly into write_file is not allowed.
-    After coding_gnome returns, review the result and continue the process.
+    ## Sketch
+    - brief description of the approach
+    ```python
+    # key structure, signatures, main logic — not full implementation
+    def my_func(args):
+        ...
+    ```
+
+    ## Review
+    Re-read the sketch above. Check for: off-by-ones, missing edge cases, wrong signatures, bad structure.
+    Explicitly state any fixes, then write the corrected final code in the tool call below.
+
+    <tool_call>{{"name": "write_file", "arguments": {{"path": "...", "content": "...full corrected implementation..."}}}}</tool_call>
+
+    ## Sketch → ## Review → tool call, all in one response. Never stop between them.
+
+    CASE 3b — Show code in chat (user asks "how would you write X", "give me an example", "show me a snippet"):
+    ## Answer
+    ```python
+    # full working code block
+    ```
+    Brief explanation if needed. No tool calls.
 
     Emit <tool_call> immediately — never say "I will do X" and stop.
     No thinking sections, no restating the question.
