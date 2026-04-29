@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 from tavily import TavilyClient
+
 load_dotenv('.env')
 
 
@@ -224,3 +225,5 @@ def edit_file(path: str, old_string: str, new_string: str) -> dict:
         return {"tool": "edit_file", "ok": False, "result": None, "error": str(e)}
 
 
+def coding_gnome(context, code_sketch):
+    return context, code_sketch
