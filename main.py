@@ -184,13 +184,19 @@ def main():
                         coding_context = args.get('context', '')
                         code_sketch = args.get('code_sketch', '')
 
+                        if ui.DEBUG:
+                            ui.show_tool_call(name, args)
+
                         ui.info('Invoking coding gnome...')
 
                         if coding_model is None:
                             coding_model, coding_tokenizer = summon_coding_gnome()
 
                         corrected_code_sketch = invoke_coding_gnome(coding_model, coding_tokenizer, coding_context, code_sketch)
-                        ui.show_tool_result(name, {"tool": name, "ok": True, "result": corrected_code_sketch, "error": None})
+                        tool_res = {"tool": name, "ok": True, "result": corrected_code_sketch, "error": None}
+                        ui.show_tool_result(name, tool_res)
+                        if ui.DEBUG:
+                            ui.show_tool_result_debug(name, tool_res)
 
                         # Feed result back to Papa for review
                         formatted = f"[coding_gnome result]\n\n{corrected_code_sketch}"
@@ -198,6 +204,9 @@ def main():
                         tool_log.append({'name': name, 'args': args, 'result': formatted})
 
                         continue
+
+                    if ui.DEBUG:
+                        ui.show_tool_call(name, args)
 
                     if requires_approval(name, args):
                         approved, feedback = ui.confirm_tool(name, args)
@@ -214,6 +223,8 @@ def main():
                     formatted = tool_registry.format_result(tool_res)
                     formatted = _compact_if_needed(formatted, name, help_model, help_tokenizer, tokenizer)
                     ui.show_tool_result(name, tool_res)
+                    if ui.DEBUG:
+                        ui.show_tool_result_debug(name, tool_res)
                     messages.append({"role": "tool", "content": formatted})
                     tool_log.append({'name': name, 'args': args, 'result': formatted})
 

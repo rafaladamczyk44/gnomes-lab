@@ -14,7 +14,8 @@ console = Console()
 def show_gnome_hut_demo():
     pass  # replaced by startup()
 
-VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv
+DEBUG = '--debug' in sys.argv or '-d' in sys.argv
+VERBOSE = '--verbose' in sys.argv or '-v' in sys.argv or DEBUG
 
 _STRIP_HEADERS = re.compile(r'^(##\s*(Answer|Plan)\s*\n?|---\s*\n?)', re.MULTILINE)
 _STRIP_TOOL_CALLS = re.compile(r'<tool_call>.*?</tool_call>', re.DOTALL)
@@ -204,6 +205,37 @@ def show_tool_result(name, result):
     hint = _result_hint(name, result)
     hint_style = 'dim' if result.get('ok') else 'red'
     console.print(f'  [dim]⚙[/dim]  [dim]{name}[/dim] [{hint_style}]({hint})[/{hint_style}]')
+
+
+def show_tool_call(name, args):
+    """Blue panel showing tool name and arguments (debug mode)."""
+    args_str = ', '.join(f'[bold]{k}[/bold]={repr(v)}' for k, v in args.items())
+    console.print(Panel(
+        f'  {name}({args_str})',
+        title='[blue bold]⚙  Tool Call[/blue bold]',
+        border_style='blue',
+        padding=(0, 1),
+    ))
+
+
+def show_tool_result_debug(name, result):
+    """Red/dim panel showing full tool result (debug mode)."""
+    is_ok = result.get('ok', False)
+    content = result.get('result') or result.get('error') or str(result)
+    if isinstance(content, list):
+        content = '\n'.join(str(item) for item in content)
+    content = str(content)
+    if len(content) > 500:
+        content = content[:500] + '\n...[truncated]'
+    border = 'dim' if is_ok else 'red'
+    label = 'Tool Result' if is_ok else 'Tool Error'
+    style = 'dim' if is_ok else 'red'
+    console.print(Panel(
+        content,
+        title=f'[{style} bold]⚙  {label}[/{style} bold]',
+        border_style=border,
+        padding=(0, 1),
+    ))
 
 
 def show_skipped(name):
