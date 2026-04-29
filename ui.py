@@ -87,6 +87,14 @@ def stream_turn(generator):
             visible = _strip_model_headers(agent_answer)
             live.update(_answer_panel(visible if visible else Text('…', style='dim')))
 
+    if DEBUG and agent_answer.strip():
+        console.print(Panel(
+            agent_answer.strip(),
+            title='[blue dim]Raw agent output[/blue dim]',
+            border_style='blue',
+            padding=(0, 1),
+        ))
+
     return full_raw, agent_answer
 
 
