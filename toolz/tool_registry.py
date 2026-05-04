@@ -150,10 +150,7 @@ def format_result(result: dict) -> str:
         return f"[Tool: bash_exec]\n" + "\n".join(parts)
 
     if tool == "read_file":
-        content = r["content"]
-        if len(content) > 4000:
-            content = content[:4000] + f"\n... [truncated, {r['lines']} lines total]"
-        return f"[Tool: read_file — {r['path']}]\n{content}"
+        return f"[Tool: read_file — {r['path']} ({r['lines']} lines total)]\n{r['content']}"
 
     if tool == "write_file":
         return f"[Tool: write_file] Written to {r['path']}"
