@@ -1,78 +1,41 @@
-from gnomes_village import papa_gnome, mama_gnome
-import mlx.core as mx
-from gnomes_village.papa_gnome import papa_gnome_answers, build_messages, _format_history_turn
+from gnomes_village import papa_gnome
+from gnomes_village.papa_gnome import papa_gnome_answers, build_messages
 from toolz import tool_registry
 from toolz.tools import requires_approval
 import ui
-from utils import tool_call_extract, sketch_extract, load_context, load_global_context, count_tokens
+from utils import tool_call_extract, sketch_extract, load_global_context, count_tokens
 from config import Config
 
 MAX_TOOL_ITERATIONS = 25
 
-# ---- Context management constants ----
-SESSION_HISTORY_WINDOW = 5          # Keep this many recent turns in prompt
+SESSION_HISTORY_WINDOW = 5
 
 COMPACT_CHAR_LIMITS = {
-    'read_file': 6000,
-    'bash_exec': 3000,
+    'read_file': 15000,
+    'bash_exec': 8000,
 }
 
 config = Config()
 
 
-def _compact_if_needed(formatted: str, tool_name: str) -> str:
-    """Truncate tool output if it exceeds character limit."""
+def compact_tool_output(formatted: str, tool_name: str) -> str:
     limit = COMPACT_CHAR_LIMITS.get(tool_name)
     if limit and len(formatted) > limit:
-        return formatted[:limit] + f'\n... [truncated at {limit} chars]'
+        shown_lines = formatted[:limit].count('\n')
+        return formatted[:limit] + f'\n... [truncated — showing ~{shown_lines} lines. Use read_file with offset={shown_lines} to read more]'
     return formatted
 
 
-def _update_session_summary(history: list, summary: str, help_model, help_tokenizer) -> tuple[list, str, object, object]:
-    """Summarize oldest turns when history exceeds window. Lazy-loads and offloads Mama Gnome."""
-    if len(history) <= SESSION_HISTORY_WINDOW:
-        return history, summary, help_model, help_tokenizer
-
-    turns_to_summarize = history[:-SESSION_HISTORY_WINDOW]
-    remaining_history = history[-SESSION_HISTORY_WINDOW:]
-    chat_text = "\n\n".join(_format_history_turn(turn) for turn in turns_to_summarize)
-
-    if help_model is None:
-        ui.info("Loading summarizer...")
-        help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
-
-    updated_summary = summary
-    try:
-        ui.info("Summarizing older session turns...")
-        new_summary = mama_gnome.summarize(help_model, help_tokenizer, chat_text)
-        if new_summary and new_summary.strip():
-            updated_summary = f"{summary.strip()}\n{new_summary.strip()}" if summary else new_summary.strip()
-    except Exception as e:
-        ui.info(f"Session summarization failed: {e}")
-
-    del help_model, help_tokenizer
-    mx.metal.clear_cache()
-
-    return remaining_history, updated_summary, None, None
-
-
 def main():
-    # Load the model
     model, tokenizer = papa_gnome.summon_papa_gnome()
 
-    help_model = None
-    help_tokenizer = None
-
-    # Load the context
     global_context = load_global_context()
-    context = load_context()
+    context = ""  # load_context() — disabled until needed
 
-    # Load the UI
     ui.show_gnome_hut_demo()
     ui.startup(model_name=config.main_model)
 
     current_session_history = []
-    session_summary = ""
     messages = None
 
     while True:
@@ -86,33 +49,7 @@ def main():
             match cmd:
                 case 'clear':
                     current_session_history.clear()
-                    session_summary = ""
-                    ui.info('Session history and summary cleared.')
-                    continue
-                case 'compact':
-                    if current_session_history:
-                        chat_text = "\n\n".join(_format_history_turn(turn) for turn in current_session_history)
-                        try:
-                            ui.info("Compacting session...")
-                            if help_model is None:
-                                ui.info("Loading summarizer...")
-                                help_model, help_tokenizer = mama_gnome.summon_mana_gnome()
-                            full_summary = mama_gnome.summarize(help_model, help_tokenizer, chat_text)
-                            if full_summary and full_summary.strip():
-                                if session_summary:
-                                    session_summary = f"{session_summary.strip()}\n{full_summary.strip()}"
-                                else:
-                                    session_summary = full_summary.strip()
-                            current_session_history.clear()
-                            ui.info('Session compacted. History cleared, summary preserved.')
-                        except Exception as e:
-                            ui.info(f"Compaction failed: {e}")
-                        finally:
-                            del help_model, help_tokenizer
-                            mx.metal.clear_cache()
-                            help_model, help_tokenizer = None, None
-                    else:
-                        ui.info("No history to compact.")
+                    ui.info('History cleared.')
                     continue
                 case 'history':
                     n = 5
@@ -146,11 +83,13 @@ def main():
                     ui.info(f"Unknown command: /{cmd}")
                     continue
 
-        messages = build_messages(query, global_context, context, current_session_history, session_summary)
+        messages = build_messages(query, global_context, context, current_session_history)
         final_answer = ''
-        tool_log = []  # Track tool calls + results for cross-turn memory
+        tool_log = []
         interrupted = False
         sketch_injected = False
+        # Per-turn cache: (path, offset, length) → formatted result; prevents redundant reads
+        read_cache = {}
 
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
@@ -196,6 +135,18 @@ def main():
                     if ui.DEBUG:
                         ui.show_tool_call(name, args)
 
+                    # Within-turn read deduplication
+                    if name == 'read_file':
+                        cache_key = (args.get('path'), args.get('offset'), args.get('length'))
+                        if cache_key in read_cache:
+                            cached = read_cache[cache_key]
+                            note = '[Already read this turn — cached result. Use different offset/length to read another section.]\n'
+                            result_msg = note + cached
+                            messages.append({"role": "tool", "content": result_msg})
+                            preview = result_msg[:500] + '...' if len(result_msg) > 500 else result_msg
+                            tool_log.append({'name': name, 'args': args, 'result': preview})
+                            continue
+
                     if requires_approval(name, args):
                         approved, feedback = ui.confirm_tool(name, args)
                         if not approved:
@@ -209,32 +160,32 @@ def main():
 
                     tool_res = tool_registry.dispatch(name, args)
                     formatted = tool_registry.format_result(tool_res)
-                    formatted = _compact_if_needed(formatted, name)
+                    formatted = compact_tool_output(formatted, name)
                     ui.show_tool_result(name, tool_res)
                     if ui.DEBUG:
                         ui.show_tool_result_debug(name, tool_res)
                     messages.append({"role": "tool", "content": formatted})
-                    tool_log.append({'name': name, 'args': args, 'result': formatted})
+
+                    if name == 'read_file':
+                        cache_key = (args.get('path'), args.get('offset'), args.get('length'))
+                        read_cache[cache_key] = formatted
+
+                    preview = formatted[:500] + '...' if len(formatted) > 500 else formatted
+                    tool_log.append({'name': name, 'args': args, 'result': preview})
 
         except KeyboardInterrupt:
             ui.show_interrupted()
             interrupted = True
 
-        # when MAX_TOOL_ITERATIONS is exhausted before a final answer,
-        # final_answer stays '' and the user only sees the token count. Show a message.
         if not interrupted and not final_answer:
             final_answer = '[Reached step limit without a final answer. Try a more focused question.]'
             ui.show_step_limit_warning()
 
-        # Always save to history (even interrupted turns) so follow-up questions have context.
         agent_record = final_answer if final_answer else '[interrupted]'
         current_session_history.append({'user': query, 'agent': agent_record, 'tools': tool_log})
-        current_session_history, session_summary, help_model, help_tokenizer = _update_session_summary(
-            current_session_history, session_summary, help_model, help_tokenizer
-        )
+        current_session_history = current_session_history[-SESSION_HISTORY_WINDOW:]
 
         if not interrupted:
-            # show token count and divider
             ui.show_token_count(count_tokens(messages, tokenizer), tokenizer.model_max_length)
             ui.show_turn_divider()
 
