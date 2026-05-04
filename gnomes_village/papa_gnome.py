@@ -43,35 +43,98 @@ def _format_history_turn(turn: dict) -> str:
     return '\n'.join(lines)
 
 
-def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict], session_summary: str = "") -> list[dict]:
-    """
-    Helper function to build the messages for the model.
-    It includes the system prompt, the user question, and the context.
-    Global context is read from ~/.gnomes/context.md (personal preferences).
-    Project context is read from the GNOMES.md file in the current directory.
-    :param user_question: Question from the traveler
-    :param global_context: Personal context from ~/.gnomes/context.md
-    :param context: Project context from the GNOMES.md file
-    :param session_history: Last N messages between the traveler and you (typically 5)
-    :param session_summary: Compressed summary of older turns that no longer fit in the window
-    :return: Compiled messages for the model
-    """
+_EXAMPLES = """
+## Examples
 
-    summary_prompt = ""
-    if session_summary:
-        summary_prompt = f"""
-        ## Earlier session summary:
-        The following is a compressed summary of earlier turns in this session that are no longer in the recent window:
-        {session_summary.strip()}
-        """
+---
 
+**Example 1 — CASE 1 (reasoning, no tools)**
+
+User: Should I store user sessions in Redis or in a SQL database?
+
+<think>
+The traveler is asking about a design tradeoff — no tools needed, no code to write. This is CASE 1.
+
+What matters for sessions: read/write speed (every request), TTL/expiry (automatic cleanup), persistence needs, scale.
+
+Redis: in-memory, sub-millisecond reads, built-in TTL per key, scales horizontally.
+SQL: durable, rich querying, no extra infra — but TTL needs a background cleanup job, slower for high-frequency reads.
+
+Verdict: Redis is standard for sessions because TTL is first-class and the access pattern (key lookup by session ID) maps exactly to what Redis is built for. SQL only makes sense if no Redis exists, you need to JOIN sessions with user records, or traffic is very low.
+
+Answer: recommend Redis directly, give the reason, note the SQL exception.
+</think>
+
+Redis is the standard choice for sessions — sub-millisecond key lookups, built-in per-key TTL (no cleanup job needed), and horizontal scaling without schema changes.
+
+SQL makes sense only if you have no Redis and traffic is low, or if you need to JOIN session data against user records. Otherwise the overhead of cleanup jobs and lock contention isn't worth it.
+
+---
+
+**Example 2 — CASE 2 (tool call)**
+
+User: How many lines of Python are in this project?
+
+<think>
+The traveler wants a count of Python lines. I need to look at the filesystem — this is CASE 2, needs tools.
+
+Best tool: bash_exec with find + wc -l. Faster than list_files + reading each file.
+Exact call: {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+
+Plan: one bash call, then answer.
+</think>
+
+## Plan
+- Count lines across all .py files with bash
+
+<tool_call>
+{"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+</tool_call>
+
+[Tool result: 1423 total]
+
+1,423 lines of Python across all .py files in this project.
+
+---
+
+**Example 3 — CASE 3 (code generation)**
+
+User: Write a function that retries a callable up to N times with exponential backoff.
+
+<think>
+The traveler wants new code — no file to read, no tool call needed. This is CASE 3. Output goes in sketch tags, nothing else.
+
+What does good retry-with-backoff look like?
+- Takes a callable + max attempts + base delay
+- Catches exceptions, sleeps base_delay * 2^attempt on failure
+- Re-raises on last attempt so caller sees the original error
+- No external dependencies
+
+Keep it minimal: no logging, no custom exceptions.
+</think>
+
+<sketch>
+import time
+
+def retry(fn, max_attempts: int = 3, base_delay: float = 0.5):
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(base_delay * (2 ** attempt))
+</sketch>
+"""
+
+
+def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict]) -> list[dict]:
     history_prompt = ""
     if session_history:
-        recent = session_history[-5:]
-        formatted = "\n\n".join(_format_history_turn(h) for h in recent)
+        formatted = "\n\n".join(_format_history_turn(h) for h in session_history)
         history_prompt = f"""
         ## Current session history:
-        To know the context of the conversation, here is the window of the last {len(recent)} messages between the traveler and you.
+        To know the context of the conversation, here is the window of the last {len(session_history)} messages between the traveler and you.
         The [Tools used] lines are a log of tools you called in prior turns — brief summaries only, not the full results. Those results are no longer in your active context. Read this history carefully to understand what was already explored and what the user knows. If you need the actual data from a prior turn to answer properly, re-run the relevant tool.
         {formatted}
 
@@ -162,7 +225,7 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     You are free to add a personal touch based on your identity.
     time: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | cwd: {os.getcwd()}
 
-    {summary_prompt}
+    {_EXAMPLES}
 
     {history_prompt}
     """
