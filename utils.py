@@ -9,16 +9,10 @@ def _escape_control_chars(s):
     in_string = False
     escape_next = False
     for ch in s:
-        if escape_next:
-            result.append(ch)
-            escape_next = False
-        elif ch == '\\' and in_string:
-            result.append(ch)
-            escape_next = True
-        elif ch == '"':
-            result.append(ch)
-            in_string = not in_string
-        elif in_string and ord(ch) < 0x20:
+        if in_string and ord(ch) < 0x20:
+            if escape_next:
+                result.pop()
+                escape_next = False
             if ch == '\n':
                 result.append('\\n')
             elif ch == '\r':
@@ -27,9 +21,26 @@ def _escape_control_chars(s):
                 result.append('\\t')
             else:
                 result.append(f'\\u{ord(ch):04x}')
+        elif escape_next:
+            result.append(ch)
+            escape_next = False
+        elif ch == '\\' and in_string:
+            result.append(ch)
+            escape_next = True
+        elif ch == '"':
+            result.append(ch)
+            in_string = not in_string
         else:
             result.append(ch)
     return ''.join(result)
+
+
+def _repair_json(s: str) -> str:
+    # Fix model dropping closing quote: "name": "tool_name, arguments": → "name": "tool_name", "arguments":
+    s = re.sub(r'("name":\s*")([^"]+),\s*arguments":', r'\1\2", "arguments":', s)
+    # Strip trailing XML-like closing tags the model sometimes appends after the JSON
+    s = re.sub(r'(\s*</[\w_]+>)+\s*$', '', s).strip()
+    return s
 
 
 def _try_parse(raw: str) -> dict | None:
@@ -38,7 +49,14 @@ def _try_parse(raw: str) -> dict | None:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        return None
+        pass
+    repaired = _repair_json(cleaned)
+    if repaired != cleaned:
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+    return None
 
 
 def sketch_extract(text: str) -> str | None:
@@ -89,15 +107,25 @@ def tool_call_extract(text):
             # Balanced scan found braces but JSON still invalid — fall through to tag fallback.
             print(f'[tool_call_extract] balanced extraction got invalid JSON, trying tag fallback', file=sys.stderr)
 
-        # Strategy 2: fall back to content between <tool_call> and the next closing tag.
-        # The model line-wraps inside string values, embedding literal newlines that make
-        # the balanced scan fail. _escape_control_chars fixes those before json.loads.
-        tag_end = re.search(r'</[\w_]+>', rest)
-        if tag_end:
-            result = _try_parse(rest[:tag_end.start()])
+        # Strategy 2: find </tool_call> and strip any intermediate XML tags the model inserted.
+        tool_call_end = re.search(r'</tool_call>', rest)
+        if tool_call_end:
+            content = re.sub(r'</[\w_]+>', '', rest[:tool_call_end.start()])
+            result = _try_parse(content)
             if result is not None:
                 calls.append(result)
                 continue
+
+        # Strategy 3: try each closing tag boundary in order (original fallback).
+        found = False
+        for tag_match in re.finditer(r'</[\w_]+>', rest):
+            result = _try_parse(rest[:tag_match.start()])
+            if result is not None:
+                calls.append(result)
+                found = True
+                break
+        if found:
+            continue
 
         print(f'[tool_call_extract] WARNING: all strategies failed. Snippet: {rest[:120]!r}', file=sys.stderr)
 
