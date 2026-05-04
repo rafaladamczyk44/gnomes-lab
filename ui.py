@@ -3,6 +3,7 @@ import sys
 import re
 import difflib
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
@@ -121,7 +122,13 @@ def render_answer(agent_answer: str):
     """Re-print the final answer as a persistent panel after the transient stream."""
     visible = _strip_model_headers(agent_answer)
     if visible:
-        console.print(_answer_panel(visible))
+        console.print(Panel(
+            Markdown(visible),
+            title='[bold green]Papa Gnome[/bold green]',
+            border_style='green',
+            padding=(0, 1),
+            width=console.width,
+        ))
 
 
 def _result_hint(name: str, res: dict) -> str:
