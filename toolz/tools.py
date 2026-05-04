@@ -65,6 +65,41 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 # Client is now created lazily inside web_search().
 
 
+_EXCLUDE_DIRS = {'.git', '.venv', 'node_modules', '__pycache__', '.mypy_cache'}
+
+
+def _is_env_file(path: str) -> bool:
+    return os.path.basename(str(path)) == '.env'
+
+
+def _has_excluded_component(path: str) -> bool:
+    return any(part in _EXCLUDE_DIRS for part in Path(path).parts)
+
+
+def _gitignored_set(paths: list) -> set:
+    """Batch-check paths against .gitignore. Returns set of ignored paths; empty set on any error."""
+    try:
+        result = subprocess.run(
+            ['git', 'check-ignore', '--stdin'],
+            input='\n'.join(paths),
+            capture_output=True, text=True, timeout=10
+        )
+        return set(result.stdout.splitlines())
+    except Exception:
+        return set()
+
+
+def _is_gitignored(path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ['git', 'check-ignore', '-q', path],
+            capture_output=True, timeout=5
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def bash_exec(cmd: str, timeout: int = 30) -> dict:
     for pattern in _BLOCKED_PATTERNS:
         if re.search(pattern, cmd):
@@ -87,6 +122,10 @@ def bash_exec(cmd: str, timeout: int = 30) -> dict:
 
 
 def read_file(path: str, offset: int = None, length: int = None) -> dict:
+    if _is_env_file(path):
+        return {"tool": "read_file", "ok": False, "result": None, "error": "Reading .env files is not permitted"}
+    if _is_gitignored(path):
+        return {"tool": "read_file", "ok": False, "result": None, "error": f"Reading gitignored files is not permitted: {path}"}
     try:
         p = Path(path).expanduser()
         content = p.read_text(encoding="utf-8", errors="replace")
@@ -108,6 +147,8 @@ def read_file(path: str, offset: int = None, length: int = None) -> dict:
 
 
 def write_file(path: str, content: str) -> dict:
+    if _is_env_file(path):
+        return {"tool": "write_file", "ok": False, "result": None, "error": "Writing .env files is not permitted"}
     try:
         p = Path(path).expanduser()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +166,10 @@ def write_file(path: str, content: str) -> dict:
 def list_files(pattern: str) -> dict:
     try:
         matches = glob.glob(pattern, recursive=True)
+        matches = [m for m in matches if not _has_excluded_component(m)]
+        if matches:
+            ignored = _gitignored_set(matches)
+            matches = [m for m in matches if m not in ignored]
         return {
             "tool": "list_files",
             "ok": True,
@@ -138,7 +183,11 @@ def list_files(pattern: str) -> dict:
 def grep_search(pattern: str, path: str) -> dict:
     try:
         proc = subprocess.run(
-            ["grep", "-rn", "--include=*", pattern, path],
+            ["grep", "-rn",
+             "--exclude-dir=.git", "--exclude-dir=.venv", "--exclude-dir=node_modules",
+             "--exclude-dir=__pycache__", "--exclude-dir=.mypy_cache",
+             "--binary-files=without-match",
+             pattern, path],
             capture_output=True, text=True, timeout=15
         )
         matches = []
@@ -210,6 +259,8 @@ def web_search(query: str, n: int = 5) -> dict:
 
 
 def edit_file(path: str, old_string: str, new_string: str) -> dict:
+    if _is_env_file(path):
+        return {"tool": "edit_file", "ok": False, "result": None, "error": "Editing .env files is not permitted"}
     try:
         p = Path(path).expanduser()
         content = p.read_text(encoding="utf-8", errors="replace")
