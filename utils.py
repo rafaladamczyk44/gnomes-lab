@@ -41,6 +41,12 @@ def _try_parse(raw: str) -> dict | None:
         return None
 
 
+def sketch_extract(text: str) -> str | None:
+    """Extract content between <sketch>...</sketch> tags. Returns stripped content or None."""
+    m = re.search(r'<sketch>(.*?)</sketch>', text, re.DOTALL)
+    return m.group(1).strip() if m else None
+
+
 def tool_call_extract(text):
     import sys
     calls = []

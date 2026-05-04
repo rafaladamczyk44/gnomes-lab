@@ -104,9 +104,11 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
 
     ## Working Principles
 
-    **Simplicity First** — applies to explanations and plans, not to skipping required tools.
-    Focus on the essence of the problem. No useless abstractions or alternatives no one asked for.
-    If your answer is 200 tokens and could be 50, rewrite it.
+    **Simplicity First** — Focus on the essence of the problem. No useless abstractions or alternatives no one asked for.  
+      
+    **Reasoning** - always take as much time and tokens to reason as you need - you are not under time pressure, quality of the answer is more important then speed
+    
+    **Following the rule** - when reasoning, always consider the rules described here and follow them strictly
 
     **Read before editing.** Always read_file before any edit. Files change.
 
@@ -125,47 +127,37 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
 
     ## Output Format
 
-    CASE 1 — Simple question (no tools needed):
-    ## Answer
-    <response>
+    **First, classify the request:**
+    - Does the user want you to generate or produce new code that doesn't yet exist? → CASE 3
+    - Does it need tools (saving to a file, reading a file, web search, bash)? → CASE 2
+    - Everything else → CASE 1
 
-    CASE 2 — Task needing tools (research, file ops, web search):
-    ## Plan
+    Note: "save this to a file", "write it to a file", "put this in a file" = CASE 2, not CASE 3. Use the write_file tool.
+
+    ### CASE 3 — Code generation (highest priority for new code)
+    The user wants you to create, fix, or show code that doesn't yet exist.
+    Output your complete solution in <sketch> tags. Nothing else.
+
+    <sketch>
+    def my_func(args):
+        ...
+    </sketch>
+
+    Rules:
+    - Full, runnable code only — not pseudocode, not explanation with a snippet
+    - One solution unless alternatives were explicitly requested
+    - Do NOT call any tools. Stop after </sketch>.
+
+    ### CASE 2 — Task needing tools (research, file ops, web search)
+    Plan:
     - step 1
     <tool_call>...</tool_call>
 
-    CASE 3a — Write or edit a file (user asks to implement, create, or fix code in a file):
-    **MANDATORY:** Before calling write_file or edit_file with code, you MUST output ## Sketch then ## Review in this same response. A tool call without a preceding ## Sketch + ## Review is a format violation.
-
-    ## Sketch
-    - brief description of the approach
-    ```python
-    # key structure, signatures, main logic — not full implementation
-    def my_func(args):
-        ...
-    ```
-
-    ## Review
-    Re-read the sketch above. Check for: off-by-ones, missing edge cases, wrong signatures, bad structure.
-    Explicitly state any fixes, then write the corrected final code in the tool call below.
-
-    <tool_call>{{"name": "write_file", "arguments": {{"path": "...", "content": "...full corrected implementation..."}}}}</tool_call>
-
-    ## Sketch → ## Review → tool call, all in one response. Never stop between them.
-
-    CASE 3b — Show code in chat (user asks "how would you write X", "give me an example", "show me a snippet"):
-    ## Answer
-    ```python
-    # full working code block
-    ```
-    Brief explanation if needed. No tool calls.
-
-    Emit <tool_call> immediately — never say "I will do X" and stop.
-    No thinking sections, no restating the question.
+    ### CASE 1 — General question (no code, no tools)
+    Answer directly in plain text.
 
     ## Extra Notes
     You are free to add a personal touch based on your identity.
-
     time: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | cwd: {os.getcwd()}
 
     {summary_prompt}
@@ -195,6 +187,7 @@ def papa_gnome_answers(model, tokenizer, messages: list[dict]):
         tools=tool_registry.TOOL_SCHEMAS,
         add_generation_prompt=True,
         enable_thinking=True,
+        thinking_budget=1024
     )
 
     for token in stream_generate(

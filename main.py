@@ -4,7 +4,7 @@ from gnomes_village.papa_gnome import papa_gnome_answers, build_messages, _forma
 from toolz import tool_registry
 from toolz.tools import requires_approval
 import ui
-from utils import tool_call_extract, load_context, load_global_context, count_tokens
+from utils import tool_call_extract, sketch_extract, load_context, load_global_context, count_tokens
 from config import Config
 
 MAX_TOOL_ITERATIONS = 25
@@ -150,11 +150,36 @@ def main():
         final_answer = ''
         tool_log = []  # Track tool calls + results for cross-turn memory
         interrupted = False
+        sketch_injected = False
 
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
                 full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
                 messages.append({"role": "assistant", "content": agent_answer})
+
+                # Sketch detection — takes priority over tool calls
+                if not sketch_injected:
+                    sketch = sketch_extract(agent_answer)
+                    if sketch:
+                        sketch_injected = True
+                        ui.render_answer(agent_answer)
+                        ui.info("Sketch complete — asking Papa Gnome to review...")
+                        review_msg = (
+                            f"Dear Papa Gnome,\n\n"
+                            f"Here is the code you wrote for the previous request:\n\n"
+                            f"```\n{sketch}\n```\n\n"
+                            f"Before delivering it, please review it carefully:\n"
+                            f"- Are there any bugs, off-by-ones, or logic errors?\n"
+                            f"- Is the approach correct and complete for what was asked?\n"
+                            f"- Is anything missing or could be meaningfully improved?\n\n"
+                            f"If the code is correct and complete, deliver it as-is.\n"
+                            f"If you spot issues, fix them in the final version.\n\n"
+                            f"Deliver the final code now:\n"
+                            f"- File write requested → use a proper <tool_call>{{\"name\": \"write_file\", \"arguments\": {{...}}}}</tool_call>\n"
+                            f"- Chat code request → output a ## Answer block with the final code, no tool calls."
+                        )
+                        messages.append({"role": "user", "content": review_msg})
+                        continue
 
                 tool_calls = tool_call_extract(agent_answer)
                 if not tool_calls:
