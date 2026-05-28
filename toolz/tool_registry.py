@@ -1,4 +1,4 @@
-from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search
+from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search, list_skills, load_skill
 
 # Compact schema fed into the model's system prompt
 TOOL_SCHEMAS = [
@@ -96,6 +96,32 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "list_skills",
+            "description": "List all available skills by name and description.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_skill",
+            "description": "Load a task-specific protocol into the session. Once loaded, it stays active for all subsequent turns.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill name (e.g. 'code_generation', 'web_research')"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "bash_exec",
             "description": "Run a shell command and return stdout/stderr. Use ONLY when **no other** tool fits.",
             "parameters": {
@@ -118,6 +144,8 @@ _DISPATCH = {
     "grep_search": grep_search,
     "web_search": web_search,
     "bash_exec": bash_exec,
+    "list_skills": list_skills,
+    "load_skill": load_skill,
 }
 
 
@@ -173,6 +201,15 @@ def format_result(result: dict) -> str:
     if tool == "web_search":
         lines = [f"{i+1}. {res}" for i, res in enumerate(r)]
         return f"[Tool: web_search]\n" + "\n".join(lines)
+
+    if tool == "list_skills":
+        if not r:
+            return "[Tool: list_skills] No skills available."
+        lines = [f"- {s['name']}: {s['description']}" for s in r]
+        return "[Tool: list_skills]\n" + "\n".join(lines)
+
+    if tool == "load_skill":
+        return f"[Skill loaded: {result['skill_name']} — active for this session]"
 
     return f"[Tool: {tool}] {r}"
 

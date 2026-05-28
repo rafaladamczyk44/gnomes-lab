@@ -258,6 +258,34 @@ def web_search(query: str, n: int = 5) -> dict:
         return {"tool": "web_search", "ok": False, "result": None, "error": str(e)}
 
 
+SKILLS_DIR = os.path.join(os.path.dirname(__file__), '..', 'skills')
+
+
+def list_skills() -> dict:
+    try:
+        skills = []
+        for path in sorted(Path(SKILLS_DIR).glob('*.md')):
+            lines = path.read_text(encoding='utf-8').splitlines()
+            # Skip title line (starts with #) and separators (---), read first content line as description
+            desc = next(
+                (l.strip() for l in lines if l.strip() and not l.startswith('#') and l.strip() != '---'),
+                path.stem
+            )
+            skills.append({'name': path.stem, 'description': desc})
+        return {'tool': 'list_skills', 'ok': True, 'result': skills, 'error': None}
+    except Exception as e:
+        return {'tool': 'list_skills', 'ok': False, 'result': None, 'error': str(e)}
+
+
+def load_skill(name: str) -> dict:
+    path = Path(SKILLS_DIR) / f'{name}.md'
+    if not path.exists():
+        return {'tool': 'load_skill', 'ok': False, 'result': None, 'skill_name': name,
+                'error': f'Skill not found: {name}'}
+    content = path.read_text(encoding='utf-8')
+    return {'tool': 'load_skill', 'ok': True, 'result': content, 'skill_name': name, 'error': None}
+
+
 def edit_file(path: str, old_string: str, new_string: str) -> dict:
     if _is_env_file(path):
         return {"tool": "edit_file", "ok": False, "result": None, "error": "Editing .env files is not permitted"}
