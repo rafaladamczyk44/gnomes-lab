@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A local, lightweight personal assistant running entirely on Apple Silicon. The goal is a Claude Code-like experience powered by local models — interactive REPL, tool use (file ops, bash, search), agentic loop, and persistent memory.
 
-See `PLAN.md` for the full implementation roadmap and current status.
-
 ---
 
 ## Architecture
@@ -17,22 +15,8 @@ See `PLAN.md` for the full implementation roadmap and current status.
 | Role | Name | Model | Runtime |
 |------|------|-------|---------|
 | Primary agent | Papa Gnome | `rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit` (local, distilled) | mlx_lm → Metal/GPU |
-| Context reducer | Mama Gnome | `mlx-community/Qwen3-4B-Instruct-2507-mxfp4` | mlx_lm → Metal/GPU |
-| Code corrector | Coder Gnome | `mlx-community/DeepSeek-Coder-1.3B-Instruct` (or 1.5B) | mlx_lm → Metal/GPU |
-
-All models run at **4-bit quantization**. Memory: ~5 GB (9B) + ~2.5 GB (4B) + ~800 MB (1.3B) = ~8.3 GB total on 16 GB M2 Pro.
 
 **Papa Gnome (9B)** is the primary — reads every message, drives the agent loop, decides tool calls, generates the final answer.
-
-**Mama Gnome (4B)** is a helper — runs on two triggers:
-1. Tool output exceeds threshold → compresses it before it enters 9B's context
-2. Session history exceeds 5 turns → summarizes oldest turns into a compact block
-3. **Background idle thread** → consolidates `memories.jsonl` when no inference is happening (deduplicates, merges similar entries)
-
-**Coder Gnome (1.3B-1.5B)** is triggered auto-detect when Papa Gnome sees coding intent:
-- User keywords: "implement", "write code", "add function", "refactor", "fix bug"
-- File extensions in query: `.py`, `.js`, `.ts`, etc.
-- Flow: Papa writes sketch → Coder returns corrected code → Papa reviews → Papa executes via tools
 
 ### Flow
 
@@ -41,11 +25,9 @@ User message
     └─► Papa Gnome (9B) — reads full conversation context
             ├─ trivial? → answer directly
             ├─ needs tools? → output <tool_call> → Python executes tools
-            │       └─ output > threshold? → Mama Gnome (4B) compresses it
+            ├─ coding question? -> output code in <sketch> tag, it is automatically returned to papa gnomed for review to adjust the first version
             └─ stream final answer to user
-                    └─ history > 5 turns? → Mama Gnome (4B) summarizes oldest turns
 ```
-
 ---
 
 ## Models
@@ -55,11 +37,6 @@ User message
 - Default: `rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit`
 - Loaded via `mlx_lm` — instruct-tuned, reasoning-distilled from Claude Opus 4.6
 - Always runs with `enable_thinking=True`
-
-**Context reducer (Mama Gnome):**
-- `mlx-community/Qwen3-4B-Instruct-2507-mxfp4` — loaded via `mlx_lm`
-- Always runs with `enable_thinking=False`
-- Hardcoded in `mama_gnome.py` (not in `Config`)
 
 **Note on Qwen3.5 vs Qwen3:**
 - Qwen3.5 mlx-community models have vision towers → require `mlx_vlm`
@@ -81,9 +58,6 @@ gnomes-lab/
 ├── PLAN.md                        # Full implementation roadmap + status
 └── gnomes_village/
     ├── papa_gnome.py              # PRIMARY agent: build_messages(), papa_gnome_answers()
-    ├── mama_gnome.py              # Context reducer: summarize(), compact_tool_output()
-    ├── coding_gnome.py            # Coder Gnome: summon_coding_gnome(), invoke_coding_gnome()
-    └── small_gnomes.py            # Unused
 └── toolz/
     ├── tools.py                   # Tool implementations + approval policy
     └── tool_registry.py           # TOOL_SCHEMAS, dispatch(), format_result()
@@ -103,8 +77,7 @@ gnomes-lab/
 - Thinking token stripping: thinking shown to user (in `--verbose` mode), stripped from messages fed back to model
 - Session history: last 5 turns injected into system prompt as a text log; tool summaries truncated to 500 chars
 - Interrupted turns saved to history so follow-up questions have context
-- Session summarization: when history exceeds 5 turns, Mama Gnome compresses oldest turns into a summary block
-- Tool output compaction via Mama Gnome:
+- Tool output compaction: applied to keep context window manageable
   - `web_search` — always compacted
   - `read_file` — compacted if > 1500 tokens
   - `bash_exec` — compacted if > 800 tokens
@@ -117,13 +90,11 @@ gnomes-lab/
 - Slash commands: `/clear`, `/compact`, `/history [n]`, `/tools`, `/model`, `/tokens`, `/undo`
 - Context loading: `load_global_context()` reads `~/.gnomes/context.md`, `load_context()` reads `GNOMES.md`/`CLAUDE.md`/`AGENTS.md` — loaded at startup but currently commented out of system prompt injection (testing)
 - Time and working directory injected into every system prompt
-- **Coder Gnome (Phase 13)**: `coding_gnome` tool triggers `gnomes_village/coding_gnome.py` — Papa writes sketch → coder model refines it → Papa reviews → proceeds with write_file/edit_file. Lazy-loaded and cached for session.
 
 **Not yet done:**
 - Persistent history (`~/.gnomes/history.jsonl`)
 - Agentic memory (`~/.gnomes/memories.jsonl`)
 - Tool result cache (web_search TTL)
-- Context token cap (120k)
 
 **Questions / nice-to-have for later:**
 - Workflows (recall mode)
@@ -134,10 +105,9 @@ gnomes-lab/
 
 ## Tech Stack
 
-- **mlx_lm** — used for both Papa and Mama Gnome
+- **mlx_lm** — used for Papa Gnome
   - `load(path)` returns `(model, tokenizer)`
   - `stream_generate()` returns token iterator
-  - `generate()` returns plain `str` (used by Mama Gnome)
   - Sampling: `make_sampler(temp, top_p, min_p, top_k)` from `mlx_lm.sample_utils`
   - Repetition: `make_logits_processors(repetition_penalty)` from `mlx_lm.sample_utils`
 
@@ -201,7 +171,7 @@ for _ in range(MAX_TOOL_ITERATIONS=25):
         dispatch → format_result → compact_if_needed → messages.append({"role": "tool", "content": result})
         tool_log.append({name, args, result})
 session_history.append({"user": query, "agent": final_answer, "tools": tool_log})
-if len(session_history) > 5 → Mama Gnome summarizes oldest turns → session_summary updated
+if len(session_history) > 5 → oldest turn dropped from window (history is lossy by design)
 ```
 
 ### Tool approval policy (`tools.py`)

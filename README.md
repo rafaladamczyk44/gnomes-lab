@@ -45,8 +45,7 @@ Default model is mlx-converted from HuggingFace's Qwen3.5-9B-Claude-4.6-Opus-Rea
 
 ```python
 # config.py
-main_model = "rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"   # Papa Gnome (primary)
-reducer_model = "mlx-community/Qwen3-4B-Instruct-2507-mxfp4"  # Mama Gnome (context reducer)
+main_model = "rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"  # Papa Gnome (primary)
 ```
 
 To convert a HuggingFace model to local MLX 4-bit:
@@ -65,7 +64,7 @@ User message
             └─ stream final answer
 ```
 
-**Mama Gnome (4B)** — context reducer, activated when a tool output exceeds ~500 tokens. Not yet wired in.
+**Context Reduction** — For large tool outputs, truncation is applied to keep the context window manageable. History keeps the last 5 turns with compacted tool-call summaries.
 
 ## File Structure
 
@@ -78,8 +77,6 @@ gnomes-lab/
 ├── PLAN.md                  # Full implementation roadmap
 └── gnomes_village/
     ├── papa_gnome.py        # Primary agent (9B): build_messages, stream
-    ├── mama_gnome.py        # Context reducer (4B) — not yet wired in
-    └── small_gnomes.py      # Unused
 └── toolz/
     ├── tools.py             # Tool implementations
     └── tool_registry.py     # TOOL_SCHEMAS, dispatch(), format_result()
