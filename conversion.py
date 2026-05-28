@@ -8,7 +8,7 @@ import os
 # REPO_NAME = "Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"
 
 HF_REPO = "Qwen/Qwen3.5-9B"
-OUTPUT_PATH = "./models/Qwen3.5-9B-4bit"
+OUTPUT_PATH = "./models/Qwen3.5-9B-8bit"
 REPO_NAME = "Qwen3.5-9B-MLX-4bit"
 
 
@@ -28,7 +28,7 @@ tags:
 4-bit MLX quantization of {REPO_NAME}
 
 ## Conversion
-Quantized using `mlx_lm.convert` with 4-bit quantization (q_bits=4, q_group_size=64)
+Quantized using `mlx_lm.convert` with 8-bit quantization (q_bits=8, q_group_size=64)
 
 ## Usage
 ```python
@@ -49,7 +49,7 @@ convert(
     hf_path=HF_REPO,
     mlx_path=OUTPUT_PATH,
     quantize=True,
-    q_bits=4,
+    q_bits=8,
     q_group_size=64,
 )
 print(f"Done. MLX model saved to: {OUTPUT_PATH}")
