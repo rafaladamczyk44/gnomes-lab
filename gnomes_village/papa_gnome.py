@@ -157,13 +157,13 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     The traveler wants a count of Python lines. I need to look at the filesystem — this is CASE 2, needs tools.
     
     Best tool: bash_exec with find + wc -l. Faster than list_files + reading each file.
-    Exact call: {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+    Exact call: {{"name": "bash_exec", "arguments": {{"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}}}
     
     Plan: one bash call
     </think>
 
     <tool_call>
-    {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+    {{"name": "bash_exec", "arguments": {{"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}}}
     </tool_call>
     
     [Tool result: 1423 total]
