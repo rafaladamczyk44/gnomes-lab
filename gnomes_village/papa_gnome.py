@@ -43,91 +43,6 @@ def _format_history_turn(turn: dict) -> str:
     return '\n'.join(lines)
 
 
-_EXAMPLES = """
-## Examples
-
----
-
-**Example 1 — CASE 1 (reasoning, no tools)**
-
-User: Should I store user sessions in Redis or in a SQL database?
-
-<think>
-The traveler is asking about a design tradeoff — no tools needed, no code to write. This is CASE 1.
-
-What matters for sessions: read/write speed (every request), TTL/expiry (automatic cleanup), persistence needs, scale.
-
-Redis: in-memory, sub-millisecond reads, built-in TTL per key, scales horizontally.
-SQL: durable, rich querying, no extra infra — but TTL needs a background cleanup job, slower for high-frequency reads.
-
-Verdict: Redis is standard for sessions because TTL is first-class and the access pattern (key lookup by session ID) maps exactly to what Redis is built for. SQL only makes sense if no Redis exists, you need to JOIN sessions with user records, or traffic is very low.
-
-Answer: recommend Redis directly, give the reason, note the SQL exception.
-</think>
-
-Redis is the standard choice for sessions — sub-millisecond key lookups, built-in per-key TTL (no cleanup job needed), and horizontal scaling without schema changes.
-
-SQL makes sense only if you have no Redis and traffic is low, or if you need to JOIN session data against user records. Otherwise the overhead of cleanup jobs and lock contention isn't worth it.
-
----
-
-**Example 2 — CASE 2 (tool call)**
-
-User: How many lines of Python are in this project?
-
-<think>
-The traveler wants a count of Python lines. I need to look at the filesystem — this is CASE 2, needs tools.
-
-Best tool: bash_exec with find + wc -l. Faster than list_files + reading each file.
-Exact call: {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
-
-Plan: one bash call, then answer.
-</think>
-
-## Plan
-- Count lines across all .py files with bash
-
-<tool_call>
-{"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
-</tool_call>
-
-[Tool result: 1423 total]
-
-1,423 lines of Python across all .py files in this project.
-
----
-
-**Example 3 — CASE 3 (code generation)**
-
-User: Write a function that retries a callable up to N times with exponential backoff.
-
-<think>
-The traveler wants new code — no file to read, no tool call needed. This is CASE 3. Output goes in sketch tags, nothing else.
-
-What does good retry-with-backoff look like?
-- Takes a callable + max attempts + base delay
-- Catches exceptions, sleeps base_delay * 2^attempt on failure
-- Re-raises on last attempt so caller sees the original error
-- No external dependencies
-
-Keep it minimal: no logging, no custom exceptions.
-</think>
-
-<sketch>
-import time
-
-def retry(fn, max_attempts: int = 3, base_delay: float = 0.5):
-    for attempt in range(max_attempts):
-        try:
-            return fn()
-        except Exception:
-            if attempt == max_attempts - 1:
-                raise
-            time.sleep(base_delay * (2 ** attempt))
-</sketch>
-"""
-
-
 def build_messages(user_question: str, global_context: str, context: str, session_history: list[dict]) -> list[dict]:
     history_prompt = ""
     if session_history:
@@ -140,24 +55,6 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
 
         Use the history to guide your thinking, especially with follow-up questions.
         """
-
-    # global_context_prompt = ""
-    # if global_context:
-    #     global_context_prompt = f"""
-    #     ## Personal Context
-    #     The following are facts about the user and their preferences. These apply across all projects.
-    #
-    #     {global_context}
-    #     """
-    #
-    # context_prompt = ""
-    # if context:
-    #     context_prompt = f"""
-    #     ## Project Context (GNOMES.md)
-    #     The following is the project-specific context for the current working directory. These are binding conventions and project facts — follow them strictly. They override general patterns and defaults.
-    #
-    #     {context}
-    #     """
 
     sys_prompt = f"""
     ## Identity
@@ -225,7 +122,83 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     You are free to add a personal touch based on your identity.
     time: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | cwd: {os.getcwd()}
 
-    {_EXAMPLES}
+    ## Examples
+
+    ---
+    
+    **Example 1 — CASE 1 (reasoning, no tools)**
+    
+    User: Should I store user sessions in Redis or in a SQL database?
+    
+    <think>
+    The traveler is asking about a design tradeoff — no tools needed, no code to write. This is CASE 1.
+    
+    What matters for sessions: read/write speed (every request), TTL/expiry (automatic cleanup), persistence needs, scale.
+    
+    Redis: in-memory, sub-millisecond reads, built-in TTL per key, scales horizontally.
+    SQL: durable, rich querying, no extra infra — but TTL needs a background cleanup job, slower for high-frequency reads.
+    
+    Verdict: Redis is standard for sessions because TTL is first-class and the access pattern (key lookup by session ID) maps exactly to what Redis is built for. SQL only makes sense if no Redis exists, you need to JOIN sessions with user records, or traffic is very low.
+    
+    Answer: recommend Redis directly, give the reason, note the SQL exception.
+    </think>
+    
+    Redis is the standard choice for sessions — sub-millisecond key lookups, built-in per-key TTL (no cleanup job needed), and horizontal scaling without schema changes.
+    
+    SQL makes sense only if you have no Redis and traffic is low, or if you need to JOIN session data against user records. Otherwise the overhead of cleanup jobs and lock contention isn't worth it.
+    
+    ---
+    
+    **Example 2 — CASE 2 (tool call)**
+    
+    User: How many lines of Python are in this project?
+    
+    <think>
+    The traveler wants a count of Python lines. I need to look at the filesystem — this is CASE 2, needs tools.
+    
+    Best tool: bash_exec with find + wc -l. Faster than list_files + reading each file.
+    Exact call: {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+    
+    Plan: one bash call
+    </think>
+
+    <tool_call>
+    {"name": "bash_exec", "arguments": {"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}
+    </tool_call>
+    
+    [Tool result: 1423 total]
+    
+    ---
+    
+    **Example 3 — CASE 3 (code generation)**
+    
+    User: Write a function that retries a callable up to N times with exponential backoff.
+    
+    <think>
+    The traveler wants new code — no file to read, no tool call needed. This is CASE 3. Output goes in sketch tags, nothing else.
+    
+    What does good retry-with-backoff look like?
+    - Takes a callable + max attempts + base delay
+    - Catches exceptions, sleeps base_delay * 2^attempt on failure
+    - Re-raises on last attempt so caller sees the original error
+    - No external dependencies
+    
+    Keep it minimal: no logging, no custom exceptions.
+    Plan: Write the code in <sketch></sketch> tag. Return only the sketch. 
+    </think>
+    
+    <sketch>
+    import time
+    
+    def retry(fn, max_attempts: int = 3, base_delay: float = 0.5):
+        for attempt in range(max_attempts):
+            try:
+                return fn()
+            except Exception:
+                if attempt == max_attempts - 1:
+                    raise
+                time.sleep(base_delay * (2 ** attempt))
+    </sketch>
 
     {history_prompt}
     """
