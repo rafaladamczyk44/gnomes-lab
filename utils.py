@@ -66,67 +66,96 @@ def extract_code_block(text: str) -> str | None:
     return matches[-1].group(1).strip() if matches else None
 
 
+def _parse_xml_tool_call(rest: str) -> dict | None:
+    """Parse Qwen3.5 XML-style tool call format:
+      <function=name>
+      <parameter=key>value</parameter>
+      </function>
+    Returns {"name": ..., "arguments": {...}} or None.
+    """
+    fn_match = re.match(r'<function=([^\s>]+)>', rest)
+    if not fn_match:
+        return None
+    name = fn_match.group(1)
+    arguments = {}
+    for pm in re.finditer(r'<parameter=([^\s>]+)>\s*(.*?)\s*</parameter>', rest, re.DOTALL):
+        key = pm.group(1)
+        val = pm.group(2).strip()
+        # Attempt to parse as JSON (for objects/arrays/numbers), fall back to string.
+        try:
+            arguments[key] = json.loads(val)
+        except (json.JSONDecodeError, ValueError):
+            arguments[key] = val
+    return {"name": name, "arguments": arguments}
+
+
 def tool_call_extract(text):
     import sys
     calls = []
     for m in re.finditer(r'<tool_call>\s*', text):
         rest = text[m.end():]
-        if not rest.startswith('{'):
-            print(f'[tool_call_extract] WARNING: <tool_call> not followed by {{. Got: {rest[:80]!r}', file=sys.stderr)
-            continue
 
-        # Strategy 1: balanced brace scan — handles wrong/missing closing tags.
-        depth = 0
-        in_string = False
-        escape_next = False
-        end = -1
-        for i, ch in enumerate(rest):
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == '\\' and in_string:
-                escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
+        # Format A: JSON  {"name": ..., "arguments": {...}}
+        if rest.lstrip().startswith('{'):
+            rest = rest.lstrip()
+            depth = 0
+            in_string = False
+            escape_next = False
+            end = -1
+            for i, ch in enumerate(rest):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == '\\' and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+
+            if end != -1:
+                result = _try_parse(rest[:end])
+                if result is not None:
+                    calls.append(result)
+                    continue
+                print(f'[tool_call_extract] balanced extraction got invalid JSON, trying tag fallback', file=sys.stderr)
+
+            tool_call_end = re.search(r'</tool_call>', rest)
+            if tool_call_end:
+                content = re.sub(r'</[\w_]+>', '', rest[:tool_call_end.start()])
+                result = _try_parse(content)
+                if result is not None:
+                    calls.append(result)
+                    continue
+
+            found = False
+            for tag_match in re.finditer(r'</[\w_]+>', rest):
+                result = _try_parse(rest[:tag_match.start()])
+                if result is not None:
+                    calls.append(result)
+                    found = True
                     break
+            if found:
+                continue
 
-        if end != -1:
-            result = _try_parse(rest[:end])
+        # Format B: XML  <function=name><parameter=k>v</parameter></function>
+        elif rest.lstrip().startswith('<function='):
+            rest = rest.lstrip()
+            tool_call_end = re.search(r'</tool_call>', rest)
+            block = rest[:tool_call_end.start()] if tool_call_end else rest
+            result = _parse_xml_tool_call(block)
             if result is not None:
                 calls.append(result)
                 continue
-            # Balanced scan found braces but JSON still invalid — fall through to tag fallback.
-            print(f'[tool_call_extract] balanced extraction got invalid JSON, trying tag fallback', file=sys.stderr)
-
-        # Strategy 2: find </tool_call> and strip any intermediate XML tags the model inserted.
-        tool_call_end = re.search(r'</tool_call>', rest)
-        if tool_call_end:
-            content = re.sub(r'</[\w_]+>', '', rest[:tool_call_end.start()])
-            result = _try_parse(content)
-            if result is not None:
-                calls.append(result)
-                continue
-
-        # Strategy 3: try each closing tag boundary in order (original fallback).
-        found = False
-        for tag_match in re.finditer(r'</[\w_]+>', rest):
-            result = _try_parse(rest[:tag_match.start()])
-            if result is not None:
-                calls.append(result)
-                found = True
-                break
-        if found:
-            continue
 
         print(f'[tool_call_extract] WARNING: all strategies failed. Snippet: {rest[:120]!r}', file=sys.stderr)
 

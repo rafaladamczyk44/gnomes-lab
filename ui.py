@@ -24,8 +24,8 @@ _STRIP_TOOL_CALLS = re.compile(r'<tool_call>.*?</tool_call>', re.DOTALL)
 # (inline re-reasoning before a tool call). stream_turn only splits on the first
 # </think>, so subsequent blocks and stray closing tags land in agent_answer and
 # render verbatim in the panel. Strip both patterns before display.
-_STRIP_THINK_BLOCK = re.compile(r'<think>.*?</think>', re.DOTALL)
-_STRIP_THINK_CLOSE = re.compile(r'</think>')
+_STRIP_THINK_BLOCK = re.compile(r'<think(?:ing)?>.*?</think(?:ing)?>', re.DOTALL)
+_STRIP_THINK_CLOSE = re.compile(r'</think(?:ing)?>')
 
 
 def _strip_model_headers(text: str) -> str:
@@ -48,32 +48,40 @@ def stream_turn(generator):
     thinking_content = ''
     agent_answer = ''
 
-    # Phase 1 — thinking: spinner with live token count.
-    think_tok = 0
-    spinner = Spinner('dots', text='[dim]Thinking…[/dim]')
+    # Phase 1 — thinking: stream tokens live into a transient panel.
+    def _thinking_panel(text: str) -> Panel:
+        return Panel(
+            Text(text, style='dim') if text else Text('…', style='dim'),
+            title='[dim]Thinking[/dim]',
+            border_style='dim',
+            padding=(0, 1),
+            width=console.width,
+        )
+
     with Live(
-        spinner,
+        _thinking_panel(''),
         console=console,
-        refresh_per_second=10,
-        transient=True,
+        refresh_per_second=20,
+        transient=not VERBOSE,
     ) as live:
         for chunk in generator:
             full_raw += chunk
             pending += chunk
             thinking_content += chunk
-            think_tok += 1
-            spinner.text = f'[dim]Thinking… ({think_tok} tok)[/dim]'
             if '</think>' in pending:
-                agent_answer = pending.split('</think>', 1)[1]
+                split_pos = pending.index('</think>')
+                thinking_content = pending[:split_pos]
+                agent_answer = pending[split_pos + len('</think>'):]
+                live.update(_thinking_panel(_STRIP_THINK_CLOSE.sub('', thinking_content).strip()))
                 break
-
-    if VERBOSE and thinking_content.strip():
-        console.print(Panel(
-            thinking_content.strip(),
-            title='[dim]Thinking[/dim]',
-            border_style='dim',
-            padding=(0, 1),
-        ))
+            if '<tool_call>' in pending:
+                # Model emitted tool call before </think> (base model behaviour).
+                split_pos = pending.index('<tool_call>')
+                thinking_content = pending[:split_pos]
+                agent_answer = pending[split_pos:]
+                live.update(_thinking_panel(_STRIP_THINK_CLOSE.sub('', thinking_content).strip()))
+                break
+            live.update(_thinking_panel(_STRIP_THINK_CLOSE.sub('', thinking_content).strip()))
 
     # Phase 2 — stream into a transient panel.
     with Live(
@@ -150,6 +158,8 @@ def _result_hint(name: str, res: dict) -> str:
         return f"{len(results)} results"
     if name in ('edit_file', 'write_file'):
         return 'saved'
+    if name == 'load_skill':
+        return res.get('skill_name', 'ok')
     return 'ok'
 
 

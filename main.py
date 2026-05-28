@@ -1,7 +1,7 @@
 from gnomes_village import papa_gnome
 from gnomes_village.papa_gnome import papa_gnome_answers, build_messages
 from toolz import tool_registry
-from toolz.tools import requires_approval
+from toolz.tools import requires_approval, load_skill
 import ui
 from utils import tool_call_extract, extract_code_block, load_global_context, load_context, count_tokens
 from config import Config
@@ -38,6 +38,7 @@ def main():
     current_session_history = []
     messages = None
     last_code_block = None
+    active_skill = ""
 
     while True:
         query = ui.user_input()
@@ -80,11 +81,24 @@ def main():
                     else:
                         ui.info("Nothing to undo.")
                     continue
+                case 'skill':
+                    skill_arg = args[0].strip() if args else 'off'
+                    if skill_arg == 'off':
+                        active_skill = ""
+                        ui.info("Skill cleared.")
+                    else:
+                        res = load_skill(skill_arg)
+                        if res['ok']:
+                            active_skill = res['result']
+                            ui.info(f"Skill loaded: {skill_arg}")
+                        else:
+                            ui.info(f"Skill not found: {skill_arg}")
+                    continue
                 case _:
                     ui.info(f"Unknown command: /{cmd}")
                     continue
 
-        messages = build_messages(query, global_context, context, current_session_history)
+        messages = build_messages(query, global_context, context, current_session_history, active_skill)
         final_answer = ''
         tool_log = []
         interrupted = False
@@ -156,6 +170,8 @@ def main():
                             continue
 
                     tool_res = tool_registry.dispatch(name, args)
+                    if name == 'load_skill' and tool_res.get('ok'):
+                        active_skill = tool_res['result']
                     formatted = tool_registry.format_result(tool_res)
                     formatted = compact_tool_output(formatted, name)
                     ui.show_tool_result(name, tool_res)
