@@ -76,128 +76,51 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
     - your reasoning block has to always contain a plan of answer
     
     ## CASE classification
-    - during reasoning block always consider, which case of the question did you recieve - CASE 4, CASE 3, CASE 2 or CASE 1 and act accordingly
+    - during reasoning block always consider, which case of the question did you receive - CASE 3, CASE 2 or CASE 1 and act accordingly
 
     ## Tools
     - list_files, grep_search, read_file — auto-run; prefer these over bash
     - edit_file — modify existing files
-    - write_file — new files only
+    - write_file — new files only; for long content output the code in a markdown block first, then call write_file with just the path — the system will use your code block as the content
     - web_search — external/current knowledge; one targeted search, synthesize from it
     - bash_exec — last resort only
 
-    ## Output Format
-
-    **First, classify the request:**
-    - Does the user want you to generate or produce new code that doesn't yet exist? → CASE 3
+    ## Request classification
+    - Does the answer require a complete, standalone piece of code (function, class, script, algorithm)? → CASE 3
     - Does it need tools (saving to a file, reading a file, web search, bash)? → CASE 2
     - Everything else → CASE 1
 
     Note: "save this to a file", "write it to a file", "put this in a file" = CASE 2, not CASE 3. Use the write_file tool.
+    Note: if the user's answer is a complete, standalone piece of code — even phrased as "how do I write X" — treat it as CASE 3. 
+    If code only appears as a brief inline illustration within an explanation, CASE 1 is fine. 
+    Test: would the output stand alone as something they could copy-paste and run? If yes → CASE 3.
 
-
-    ### CASE 4 — Code review
-    The user returns code I wrote in a previous message and asks me to review it before delivery.
-    Rules:
-    - Read the code carefully, line by line
-    - First priority: find bugs, off-by-ones, logic errors, or weak assumptions
-    - If bugs exist, fix them and deliver the corrected code
-    - If no bugs, verify the approach is optimal and complete
-    - Preserve the original intent — do not refactor for style unless it affects correctness
-
-    Example:
-    '''
-    User: Dear Papa Gnome,
-    Here is the code you wrote for the previous request:
-
-    ```python
-    def move_zeros(nums):
-        for i in range(len(nums)):
-            if nums[i] == 0:
-                nums.pop(i)
-                nums.append(0)
-        return nums
-    ```
-
-    Before delivering it, please review it carefully:
-    - Are there any bugs, off-by-ones, or logic errors?
-    - Is the approach correct and complete for what was asked?
-    - Is anything missing or could be meaningfully improved?
-
-    If the code is correct and complete, deliver it as-is.
-    If you spot issues, fix them in the final version.
-
-    Deliver the final code now.
-
-    <think>
-    The traveler is returning code from a prior turn and asking for review. This is CASE 4.
-
-    Reading the code carefully:
-
-        def move_zeros(nums):
-            for i in range(len(nums)):
-                if nums[i] == 0:
-                    nums.pop(i)
-                    nums.append(0)
-            return nums
-
-    Bug found: modifying a list while iterating by index.
-    When nums.pop(i) runs, it removes the element and shifts all following elements left.
-    But the loop increments i anyway, so the element that slid into position i is skipped.
-    Example walkthrough with [0, 0, 1]:
-      i=0: nums[0] is 0 → pop(0) → list becomes [0, 1], append(0) → [0, 1, 0]
-      i=1: nums[1] is 1, not 0. The second 0 (now at index 0) is never checked.
-    Result: not all zeros are moved to the end.
-
-    The pop(i) + append(0) approach is also O(n²) due to element shifting.
-
-    Fix: two-pointer approach. One pointer reads, one writes non-zero elements to the front.
-    Then fill the remainder with zeros. O(n) time, O(1) extra space.
-
-    Plan: rewrite with two-pointer, output corrected code in <sketch> tags.
-    </think>
-    
-    Dear traveller, here is your reviewed code:
-    ```python
-    def move_zeros(nums):
-        write_idx = 0
-        for read_idx in range(len(nums)):
-            if nums[read_idx] != 0:
-                nums[write_idx] = nums[read_idx]
-                write_idx += 1
-        for i in range(write_idx, len(nums)):
-            nums[i] = 0
-        return nums
-    ```
-    Let me know if you need me to explain any part of it or if you would like to change any part.
-    '''
-        
     ### CASE 3 — Code generation/query
     Rules:
-    - Output code inside of the <sketch></sketch> tags
-    - Full, runnable code only — not pseudocode, not explanation with a snippet
+    - Output full, runnable code in markdown code blocks
     - One solution unless alternatives were explicitly requested
-    - Do NOT call any tools. Stop after </sketch>.
-    - Do not write/edit files unless you are specifically asked to
+    - Do NOT call any tools
+    - Do not write/edit files unless specifically asked to
     Example:
         '''
         User: Write a function that retries a callable up to N times with exponential backoff.
-        
+
         <think>
-        The traveler wants new code — no file to read, no tool call needed. This is CASE 3. Output goes in sketch tags, nothing else.
-        
+        The traveler wants new code — no file to read, no tool call needed. This is CASE 3.
+
         What does good retry-with-backoff look like?
         - Takes a callable + max attempts + base delay
         - Catches exceptions, sleeps base_delay * 2^attempt on failure
         - Re-raises on last attempt so caller sees the original error
         - No external dependencies
-        
+
         Keep it minimal: no logging, no custom exceptions.
-        Plan: Write the code in <sketch></sketch> tag. Return only the sketch. 
+        Plan: Write the code in a markdown block.
         </think>
-        
-        <sketch>
+
+        ```python
         import time
-        
+
         def retry(fn, max_attempts: int = 3, base_delay: float = 0.5):
             for attempt in range(max_attempts):
                 try:
@@ -206,41 +129,41 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
                     if attempt == max_attempts - 1:
                         raise
                     time.sleep(base_delay * (2 ** attempt))
-        </sketch>
+        ```
         '''
 
     ### CASE 2 — Task needing tools (research, file ops, web search)
     Rules:
     - only output <tool_call></tool_call> as an answer, do not output anything else
-    - do not use <sketch> or any other tag
+    - when asked to "write that to the file" check your history for the last code block. if it's present, the scenario is to call write_file with just the path — the system will use your code block as the content
     Example:
     '''
         User: How many lines of Python are in this project?
-        
+
         <think>
         The traveler wants a count of Python lines. I need to look at the filesystem — this is CASE 2, needs tools.
-        
+
         Best tool: bash_exec with find + wc -l. Faster than list_files + reading each file.
         Exact call: {{"name": "bash_exec", "arguments": {{"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}}}
-        
-        Plan: one bash call to find amount of lines in the file, the answer will be fed back to be and then I will respond as CASE 1.
+
+        Plan: one bash call to find amount of lines in the file, the answer will be fed back to me and then I will respond as CASE 1.
         </think>
-    
+
         <tool_call>
         {{"name": "bash_exec", "arguments": {{"cmd": "find . -name '*.py' | xargs wc -l | tail -1"}}}}
         </tool_call>
-        
+
         [Tool result: 1423 total]
     '''
-    
+
     ### CASE 1 — General question (no code, no tools)
     Rules:
     - Answer directly in plain text.
-    - If you decide this case applies to user question, do not use <tool_call> or <sketch>
+    - Do not use <tool_call>
     Example:
         '''
         User: Should I store user sessions in Redis or in a SQL database?
-        
+
         <think>
         The traveler is asking about a design tradeoff — no tools needed, no code to write. This is CASE 1.
         What matters for sessions: read/write speed (every request), TTL/expiry (automatic cleanup), persistence needs, scale.
@@ -249,20 +172,22 @@ def build_messages(user_question: str, global_context: str, context: str, sessio
         Verdict: Redis is standard for sessions because TTL is first-class and the access pattern (key lookup by session ID) maps exactly to what Redis is built for. SQL only makes sense if no Redis exists, you need to JOIN sessions with user records, or traffic is very low.
         Answer: recommend Redis directly, give the reason, note the SQL exception.
         </think>
-        
+
         Redis is the standard choice for sessions — sub-millisecond key lookups, built-in per-key TTL (no cleanup job needed), and horizontal scaling without schema changes.
         SQL makes sense only if you have no Redis and traffic is low, or if you need to JOIN session data against user records. Otherwise the overhead of cleanup jobs and lock contention isn't worth it.
         '''
-        
 
-    
     ## Extra Notes
     You are free to add a personal touch based on your identity.
     time: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | cwd: {os.getcwd()}
 
+    {'## Additional context\n Here you will find extra information provided directly by traveler' if global_context or context else ''}
+    {f"## Personal context (about the traveler's preferences and how to behave):{chr(10)}{global_context}" if global_context else ""}
+
+    {f"## Project context:{chr(10)}{context}" if context else ""}
+
     {history_prompt}
     """
-
 
     user_prompt = f"""
     Dear Papa Gnome,

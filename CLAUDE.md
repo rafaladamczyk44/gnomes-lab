@@ -23,9 +23,8 @@ A local, lightweight personal assistant running entirely on Apple Silicon. The g
 ```
 User message
     └─► Papa Gnome (9B) — reads full conversation context
-            ├─ trivial? → answer directly
-            ├─ needs tools? → output <tool_call> → Python executes tools
-            ├─ coding question? -> output code in <sketch> tag, it is automatically returned to papa gnomed for review to adjust the first version
+            ├─ needs tools? → output <tool_call> → Python executes tools → repeat
+            ├─ coding question? → answer with code in markdown blocks
             └─ stream final answer to user
 ```
 ---
@@ -78,17 +77,17 @@ gnomes-lab/
 - Session history: last 5 turns injected into system prompt as a text log; tool summaries truncated to 500 chars
 - Interrupted turns saved to history so follow-up questions have context
 - Tool output compaction: applied to keep context window manageable
-  - `web_search` — always compacted
-  - `read_file` — compacted if > 1500 tokens
-  - `bash_exec` — compacted if > 800 tokens
+  - `read_file` — truncated if > 15000 chars
+  - `bash_exec` — truncated if > 8000 chars
+- Within-turn `read_file` deduplication: same (path, offset, length) returns cached result
 - Tool guardrails: `write_file`, `edit_file`, `web_search` always require confirmation; `bash_exec` requires confirmation only for risky patterns (rm, mv, git push, etc.); others run automatically
 - Blocked bash patterns: `rm -rf /`, `sudo`, `mkfs`, `dd if=`, etc.
-- 9 tools: `list_files`, `grep_search`, `read_file` (with offset/length), `edit_file`, `write_file`, `web_search`, `bash_exec`, `cd`, `coding_gnome`
+- 8 tools: `list_files`, `grep_search`, `read_file` (with offset/length), `edit_file`, `write_file`, `web_search`, `bash_exec`, `cd`
 - Approval UI: 3 options — Allow / Skip / Skip + feedback (feedback injected into model context)
 - Diff view for `edit_file` approval: shows red/green unified diff instead of raw args
 - Robust `tool_call_extract` in `utils.py`: two strategies — (1) balanced brace scan ignoring closing tag name, (2) tag-boundary fallback for model line-wrap inside JSON strings; `_escape_control_chars` fixes literal newlines before `json.loads`
-- Slash commands: `/clear`, `/compact`, `/history [n]`, `/tools`, `/model`, `/tokens`, `/undo`
-- Context loading: `load_global_context()` reads `~/.gnomes/context.md`, `load_context()` reads `GNOMES.md`/`CLAUDE.md`/`AGENTS.md` — loaded at startup but currently commented out of system prompt injection (testing)
+- Slash commands: `/clear`, `/history [n]`, `/tools`, `/model`, `/tokens`, `/undo`
+- Context loading: `load_global_context()` reads `~/.gnomes/context.md`, `load_context()` reads `GNOMES.md`/`CLAUDE.md`/`AGENTS.md` — both injected into system prompt at startup
 - Time and working directory injected into every system prompt
 
 **Not yet done:**
@@ -143,25 +142,9 @@ Tool result fed back as:
 - `agent_answer` (post-`</think>`) → appended to `messages` as assistant turn, parsed for tool calls, stored in session history
 - Think blocks are NOT fed back into the model context — only the final answer is
 
-### Agent output format (enforced via system prompt)
-
-Simple answer:
-```
-## Answer
-<response>
-```
-
-Tool-using turn:
-```
-## Plan
-- step 1
-- step 2
-<tool_call>...</tool_call>
-```
-
 ### Agentic loop (main.py)
 ```
-messages = build_messages(query, global_context, context, session_history, session_summary)
+messages = build_messages(query, global_context, context, session_history)
 for _ in range(MAX_TOOL_ITERATIONS=25):
     stream + collect → (full_raw, agent_answer)
     messages.append({"role": "assistant", "content": agent_answer})   # no think blocks

@@ -59,10 +59,11 @@ def _try_parse(raw: str) -> dict | None:
     return None
 
 
-def sketch_extract(text: str) -> str | None:
-    """Extract content between <sketch>...</sketch> tags. Returns stripped content or None."""
-    m = re.search(r'<sketch>(.*?)</sketch>', text, re.DOTALL)
-    return m.group(1).strip() if m else None
+
+def extract_code_block(text: str) -> str | None:
+    """Extract the last fenced code block from text. Returns content without the fence lines."""
+    matches = list(re.finditer(r'```(?:\w+)?\n(.*?)```', text, re.DOTALL))
+    return matches[-1].group(1).strip() if matches else None
 
 
 def tool_call_extract(text):
