@@ -122,8 +122,9 @@ def render_answer(agent_answer: str):
     """Re-print the final answer as a persistent panel after the transient stream."""
     visible = _strip_model_headers(agent_answer)
     if visible:
+        content = visible if DEBUG else Markdown(visible)
         console.print(Panel(
-            Markdown(visible),
+            content,
             title='[bold green]Papa Gnome[/bold green]',
             border_style='green',
             padding=(0, 1),
