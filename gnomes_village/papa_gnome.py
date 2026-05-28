@@ -163,7 +163,7 @@ def papa_gnome_answers(model, tokenizer, messages: list[dict]):
         formatted,
         max_tokens=tokenizer.model_max_length,
         sampler=make_sampler(temp=0.8, top_p=0.9, min_p=0.00, top_k=40),
-        logits_processors=make_logits_processors(repetition_penalty=1.0, presence_penalty=1.5),
+        logits_processors=make_logits_processors(repetition_penalty=1.0),
     ):
         if token.text:
             yield token.text
