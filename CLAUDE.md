@@ -55,6 +55,10 @@ gnomes-lab/
 ├── ui.py                          # Rich terminal UI: streaming, panels, tool display, approval
 ├── utils.py                       # tool_call_extract(), count_tokens(), load_context()
 ├── PLAN.md                        # Full implementation roadmap + status
+├── skills/                        # Skill files loaded by Papa Gnome on demand
+│   ├── code_generation.md
+│   ├── file_ops.md
+│   └── web_research.md
 └── gnomes_village/
     ├── papa_gnome.py              # PRIMARY agent: build_messages(), papa_gnome_answers()
 └── toolz/
@@ -65,6 +69,43 @@ gnomes-lab/
     ├── history.jsonl              # raw transcript
     └── memories.jsonl             # agent-authored insights
 ```
+
+---
+
+## Skills
+
+Skills live in `skills/*.md`. Papa Gnome loads them on demand via `load_skill(name)`.
+The available list is injected into the system prompt on every turn via `list_skills()` in `build_messages()`.
+
+### Skill file structure (mandatory)
+
+```markdown
+# Skill: <Human Readable Name>
+<One-sentence description — this line is shown to Papa Gnome in the system prompt skill list.>
+
+---
+
+## <Section>
+...content...
+```
+
+Rules:
+- **Line 1** — `# Skill: Name` (title, not shown in skill list)
+- **Line 2** — plain sentence description, no markdown. This is what `list_skills()` extracts and what Papa Gnome reads to decide whether to load the skill.
+- All subsequent content — detailed protocol, scenarios, examples, rules
+
+### Current skills
+
+| File | Description |
+|---|---|
+| `code_generation.md` | All code-related tasks: writing, editing, debugging, refactoring |
+| `file_ops.md` | File and directory operations: reading, searching, editing, writing |
+| `web_research.md` | Web research: multi-query search, cross-reference, cite sources |
+
+### Adding a new skill
+
+1. Create `skills/<name>.md` following the structure above
+2. It appears automatically in the system prompt on the next run — no code changes needed
 
 ---
 
