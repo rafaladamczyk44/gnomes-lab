@@ -162,6 +162,11 @@ def tool_call_extract(text):
     return calls if calls else None
 
 
+def has_closed_think_block(raw: str) -> bool:
+    """Return True if raw model output contains a closed <think> or <thinking> block."""
+    return bool(re.search(r'</think(?:ing)?>', raw))
+
+
 def count_tokens(messages, tokenizer) -> int:
     text = tokenizer.apply_chat_template(messages, tokenize=False)
     return len(tokenizer.encode(text, add_special_tokens=False))

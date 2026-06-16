@@ -127,17 +127,15 @@ def _answer_panel(content):
 
 
 def render_answer(agent_answer: str):
-    """Re-print the final answer as a persistent panel after the transient stream."""
+    """Re-print the final answer persistently without panel borders for easy copying."""
     visible = _strip_model_headers(agent_answer)
-    if visible:
-        content = visible if DEBUG else Markdown(visible)
-        console.print(Panel(
-            content,
-            title='[bold green]Papa Gnome[/bold green]',
-            border_style='green',
-            padding=(0, 1),
-            width=console.width,
-        ))
+    if not visible:
+        return
+    console.print()
+    console.print('[bold green]Papa Gnome[/bold green]')
+    console.print()
+    content = visible if DEBUG else Markdown(visible)
+    console.print(content)
 
 
 def _result_hint(name: str, res: dict) -> str:

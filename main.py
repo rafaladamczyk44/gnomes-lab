@@ -3,7 +3,7 @@ from gnomes_village.papa_gnome import papa_gnome_answers, build_messages
 from toolz import tool_registry
 from toolz.tools import requires_approval, load_skill
 import ui
-from utils import tool_call_extract, extract_code_block, load_global_context, load_context, count_tokens
+from utils import tool_call_extract, extract_code_block, load_global_context, load_context, count_tokens, has_closed_think_block
 from config import Config
 
 MAX_TOOL_ITERATIONS = 25
@@ -109,6 +109,18 @@ def main():
         try:
             for _ in range(MAX_TOOL_ITERATIONS):
                 full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
+
+                if not has_closed_think_block(full_raw):
+                    ui.info("Papa Gnome forgot his think tags — asking him to retry...")
+                    messages.append({"role": "assistant", "content": agent_answer or full_raw})
+                    messages.append({
+                        "role": "tool",
+                        "content": "[Your response is missing the required <think>...</think> block. "
+                                   "Always wrap your reasoning in <think>...</think> and close it with </think> "
+                                   "before your final answer or any tool call.]"
+                    })
+                    full_raw, agent_answer = ui.stream_turn(papa_gnome_answers(model, tokenizer, messages))
+
                 messages.append({"role": "assistant", "content": agent_answer})
 
                 block = extract_code_block(agent_answer)
