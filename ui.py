@@ -181,8 +181,8 @@ def _render_edit_diff(args) -> Text:
     path = args.get('path', '')
     old = args.get('old_string', '')
     new = args.get('new_string', '')
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
+    old_lines = old.splitlines(keepends=False)
+    new_lines = new.splitlines(keepends=False)
     diff = list(difflib.unified_diff(old_lines, new_lines, fromfile=path, tofile=path, lineterm=''))
     t = Text()
     t.append(f'  {path}\n', style='bold')
@@ -374,6 +374,7 @@ def show_tools():
         ('edit_file', 'path + old_string + new_string → in-place edit'),
         ('write_file', 'path + content → create/overwrite file'),
         ('web_search', 'query → search results via Tavily'),
+        ('fetch_url', 'url → extracted page text'),
         ('bash_exec', 'shell command → stdout/stderr (LAST RESORT)'),
     ]
     t = Text()

@@ -1,4 +1,4 @@
-from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search, list_skills, load_skill
+from toolz.tools import bash_exec, read_file, write_file, edit_file, list_files, grep_search, web_search, fetch_url, list_skills, load_skill
 
 # Compact schema fed into the model's system prompt
 TOOL_SCHEMAS = [
@@ -96,6 +96,21 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_url",
+            "description": "Fetch and extract readable text from a web page URL. Use after web_search when a snippet is not enough. Only https:// URLs are allowed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full https:// URL to fetch"},
+                    "max_chars": {"type": "integer", "description": "Maximum characters to return (default 15000)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "list_skills",
             "description": "List all available skills by name and description.",
             "parameters": {
@@ -143,6 +158,7 @@ _DISPATCH = {
     "list_files": list_files,
     "grep_search": grep_search,
     "web_search": web_search,
+    "fetch_url": fetch_url,
     "bash_exec": bash_exec,
     "list_skills": list_skills,
     "load_skill": load_skill,
@@ -199,8 +215,19 @@ def format_result(result: dict) -> str:
         return f"[Tool: grep_search] {r['count']} matches:\n" + "\n".join(lines) + suffix
 
     if tool == "web_search":
-        lines = [f"{i+1}. {res}" for i, res in enumerate(r)]
-        return f"[Tool: web_search]\n" + "\n".join(lines)
+        lines = []
+        for i, res in enumerate(r):
+            title = res.get("title") or "Untitled"
+            url = res.get("url") or ""
+            snippet = res.get("content", "")
+            lines.append(f"{i+1}. {title}\n   URL: {url}\n   {snippet}")
+        return f"[Tool: web_search]\n" + "\n\n".join(lines)
+
+    if tool == "fetch_url":
+        title = r.get("title") or "Untitled"
+        content = r.get("content", "")
+        header = f"[Tool: fetch_url — {title}\n{r['url']} ({r['chars']} chars)]"
+        return f"{header}\n{content}"
 
     if tool == "list_skills":
         if not r:

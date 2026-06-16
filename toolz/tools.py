@@ -5,13 +5,18 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 from tavily import TavilyClient
+import requests
+from bs4 import BeautifulSoup
+from config import Config
 
 load_dotenv('.env')
+
+config = Config()
 
 
 # ---- Approval policy ----
 # These tools ALWAYS require approval regardless of arguments.
-REQUIRE_APPROVAL = {"write_file", "edit_file", "web_search"}
+REQUIRE_APPROVAL = {"write_file", "edit_file", "web_search", "fetch_url"}
 
 # bash_exec is special: auto-run by default, but requires approval if the
 # command matches any risky pattern (state-changing operations).
@@ -54,6 +59,8 @@ def is_risky_bash_exec(cmd: str) -> bool:
 def requires_approval(name: str, args: dict) -> bool:
     """Determine whether a tool call requires user approval."""
     if name in REQUIRE_APPROVAL:
+        if name in ("web_search", "fetch_url") and config.auto_web_permission:
+            return False
         return True
     if name == "bash_exec":
         return is_risky_bash_exec(args.get("cmd", ""))
@@ -209,6 +216,7 @@ def grep_search(pattern: str, path: str) -> dict:
 
 
 
+
 def web_search(query: str, n: int = 5) -> dict:
     # CHANGE 3b — lazy init: create TavilyClient here instead of at module import.
     # Returns a clean error if the API key is missing rather than crashing startup.
@@ -217,11 +225,87 @@ def web_search(query: str, n: int = 5) -> dict:
                 "error": "TAVILY_API_KEY not set in environment"}
     try:
         client = TavilyClient(TAVILY_API_KEY)
-        response = client.search(query=query, maxResults=3)
-        results = [res['content'] for res in response['results']]
+        response = client.search(query=query, maxResults=min(n, 10))
+        results = [
+            {"title": res.get("title", ""), "url": res.get("url", ""), "content": res.get("content", "")}
+            for res in response.get("results", [])
+        ]
         return {"tool": "web_search", "ok": True, "result": results, "error": None}
     except Exception as e:
         return {"tool": "web_search", "ok": False, "result": None, "error": str(e)}
+
+
+def fetch_url(url: str, max_chars: int = 15000) -> dict:
+    """Fetch and extract readable text from a URL. Only HTTPS is allowed for security."""
+    if not url.startswith("https://"):
+        return {"tool": "fetch_url", "ok": False, "result": None,
+                "error": "Only https:// URLs are allowed. Plain http:// is not permitted for security."}
+
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+        }
+        resp = requests.get(url, timeout=30, headers=headers)
+        resp.raise_for_status()
+
+        content_type = resp.headers.get("Content-Type", "").lower()
+        title = ""
+
+        if "text/html" in content_type:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            if soup.title:
+                title = soup.title.get_text(strip=True)
+
+            # Remove noise tags
+            for tag in soup(["script", "style", "nav", "footer", "header", "aside",
+                             "form", "noscript", "iframe", "svg", "canvas", "video", "audio"]):
+                tag.decompose()
+
+            texts = []
+            for tag in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6",
+                                      "p", "li", "pre", "code", "td", "th",
+                                      "article", "section", "main", "div"]):
+                text = tag.get_text(strip=True)
+                if text:
+                    texts.append(text)
+
+            # Deduplicate adjacent identical lines (common in noisy HTML)
+            deduped = []
+            prev = None
+            for line in texts:
+                if line != prev:
+                    deduped.append(line)
+                    prev = line
+            content = "\n\n".join(deduped)
+        else:
+            content = resp.text
+
+        truncated = False
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n...[truncated]"
+            truncated = True
+
+        return {
+            "tool": "fetch_url",
+            "ok": True,
+            "result": {
+                "url": url,
+                "title": title,
+                "content": content,
+                "chars": len(content),
+                "truncated": truncated,
+            },
+            "error": None,
+        }
+    except requests.exceptions.Timeout:
+        return {"tool": "fetch_url", "ok": False, "result": None, "error": "Request timed out"}
+    except requests.exceptions.RequestException as e:
+        return {"tool": "fetch_url", "ok": False, "result": None, "error": f"Request failed: {e}"}
+    except Exception as e:
+        return {"tool": "fetch_url", "ok": False, "result": None, "error": str(e)}
 
 
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), '..', 'skills')
