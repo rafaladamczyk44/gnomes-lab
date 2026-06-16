@@ -39,6 +39,7 @@ _BLOCKED_PATTERNS = [
     r"dd\s+if=",
     r">\s*/dev/sd",
     r"chmod\s+-R\s+777\s+/",
+    r"(?:^|\s|/)\.env(?:\s|$)",  # reading .env files via shell is blocked
 ]
 
 
@@ -208,42 +209,7 @@ def grep_search(pattern: str, path: str) -> dict:
 
 
 
-
-# Track current working directory across tool calls
-current_dir: str = os.getcwd()
-
-
-# TODO: register?
-def cd(path: str) -> dict:
-    """Change current working directory."""
-    # CHANGE 3a — `global current_dir` is required; without it, `current_dir = resolved_path`
-    # is a local assignment and the module-level variable is never updated.
-    global current_dir
-    try:
-        resolved_path = os.path.abspath(os.path.expanduser(path))
-        resolved_path = os.path.normpath(resolved_path)
-        if not os.path.exists(resolved_path):
-            return {"tool": "cd", "ok": False, "result": None, "error": f"No such directory: {path}"}
-        if not os.path.isdir(resolved_path):
-            return {"tool": "cd", "ok": False, "result": None, "error": f"Not a directory: {path}"}
-
-        previous_dir = current_dir       # save before overwrite
-        os.chdir(resolved_path)
-        current_dir = resolved_path      # now correctly updates the module-level var
-
-        return {
-            "tool": "cd",
-            "ok": True,
-            # CHANGE 3a — was `current_dir` (new path after reassignment); now `previous_dir`
-            "result": {"path": resolved_path, "previous_dir": previous_dir},
-            "error": None,
-        }
-    except Exception as e:
-        return {"tool": "cd", "ok": False, "result": None, "error": str(e)}
-
-
 def web_search(query: str, n: int = 5) -> dict:
-    # TODO: plug in a search backend (e.g. duckduckgo_search, SearXNG, Brave API)
     # CHANGE 3b — lazy init: create TavilyClient here instead of at module import.
     # Returns a clean error if the API key is missing rather than crashing startup.
     if not TAVILY_API_KEY:

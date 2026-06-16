@@ -390,13 +390,11 @@ def show_tools():
     ))
 
 
-def show_model(model_name: str, small_model: str):
+def show_model(model_name: str):
     """Display current model configuration."""
     short_main = model_name.split('/')[-1] if '/' in model_name else model_name
-    short_small = small_model.split('/')[-1] if '/' in small_model else small_model
     console.print(Panel(
-        f'  [bold]Papa Gnome[/bold]  {short_main}\n'
-        f'  [bold]Mama Gnome[/bold] {short_small}',
+        f'  [bold]Papa Gnome[/bold]  {short_main}',
         title='[bold]Models[/bold]',
         border_style='dim',
         padding=(0, 1),

@@ -15,40 +15,17 @@ Or with an activated venv:
 source .venv/bin/activate && python main.py
 ```
 
-### Global `gnomes` command
-
-Install once, run from anywhere:
-
-```bash
-uv tool install .
-```
-
-This creates a `gnomes` executable in `~/.local/bin/`. After that:
-
-```bash
-cd ~/any/project
-gnomes               # starts the REPL from the current directory
-```
-
-**Updating after code changes:** `uv tool install` snapshots the code at install time. After editing source files, reinstall to pick up changes:
-
-```bash
-uv tool upgrade gnomes-lab .
-```
-
-For development, prefer `uv run main.py` — it uses the live source without reinstalling.
-
 ## Switching the model
 
-Models are configured in `config.py`. Change the path there to swap the primary or context-reducer model.
-Default model is mlx-converted from HuggingFace's Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2 (https://huggingface.co/Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2)
+Models are configured in `config.py`. Change the path there to swap the primary model.
+Default model is the base Qwen3.5-9B 4-bit MLX conversion:
 
 ```python
 # config.py
-main_model = "rafal-adamczyk/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-v2-MLX-4bit"  # Papa Gnome (primary)
+main_model = "rafal-adamczyk/Qwen3.5-9B-MLX-4bit"  # Papa Gnome (primary)
 ```
 
-To convert a HuggingFace model to local MLX 4-bit:
+To convert a HuggingFace model to local MLX:
 
 ```bash
 python conversion.py
@@ -64,36 +41,41 @@ User message
             └─ stream final answer
 ```
 
-**Context Reduction** — For large tool outputs, truncation is applied to keep the context window manageable. History keeps the last 5 turns with compacted tool-call summaries.
+There is only one model: Papa Gnome (9B). No secondary model, no context reducer.
 
 ## File Structure
 
 ```
 gnomes-lab/
 ├── main.py                  # REPL entry point + agentic loop
-├── config.py                # Model paths
-├── conversion.py            # Convert HF model → local MLX 4-bit
+├── config.py                # Model paths + unused config placeholders
+├── conversion.py            # Convert HF model → local MLX quantized
 ├── ui.py                    # Terminal UI (rich panels)
-├── PLAN.md                  # Full implementation roadmap
-└── gnomes_village/
-    ├── papa_gnome.py        # Primary agent (9B): build_messages, stream
+├── utils.py                 # Tool-call parsing, token counting, context loading
+├── skills/                  # Task-specific skill files
+│   ├── code_generation.md
+│   ├── file_ops.md
+│   └── web_research.md
+├── gnomes_village/
+│   ├── __init__.py
+│   └── papa_gnome.py        # Primary agent (9B): build_messages, stream
 └── toolz/
-    ├── tools.py             # Tool implementations
+    ├── tools.py             # Tool implementations + approval policy
     └── tool_registry.py     # TOOL_SCHEMAS, dispatch(), format_result()
 ```
 
 ## Tools
 
-8 tools available: `list_files`, `grep_search`, `read_file`, `edit_file`, `write_file`, `web_search`, `bash_exec`, `cd`.
+9 tools available: `list_files`, `grep_search`, `read_file`, `edit_file`, `write_file`, `web_search`, `bash_exec`, `list_skills`, `load_skill`.
+
+Directory changes are handled through `bash_exec` if needed; there is no dedicated `cd` tool.
 
 Destructive tools (`bash_exec`, `write_file`, `edit_file`, `web_search`) require confirmation before running.
 
 ## TODO
 
 - [ ] Persistent history (`~/.gnomes/history.jsonl`)
-- [ ] Always-on context files (`~/.gnomes/context.md`, `./GNOMES.md`)
-- [ ] Agentic memory (`~/.gnomes/memory/`)
-- [ ] 4B context reducer for large tool outputs
-- [ ] Slash commands (`/clear`, `/history`, `/tools`)
-- [ ] Ctrl+C handling during generation
-- [ ] Token count indicator per turn
+- [ ] Agentic memory (`~/.gnomes/memories.jsonl`)
+- [ ] Tool result cache (web_search TTL — `Config.web_search_cache_ttl` is unused)
+- [ ] Context-size management (`Config.max_context_tokens` and `Config.compact_threshold` are unused)
+- [ ] Session recap on exit/startup

@@ -8,7 +8,7 @@ from config import Config
 
 MAX_TOOL_ITERATIONS = 25
 
-SESSION_HISTORY_WINDOW = 5
+SESSION_HISTORY_WINDOW = 10
 
 COMPACT_CHAR_LIMITS = {
     'read_file': 15000,
@@ -66,7 +66,7 @@ def main():
                     ui.show_tools()
                     continue
                 case 'model':
-                    ui.show_model(config.main_model, config.small_model)
+                    ui.show_model(config.main_model)
                     continue
                 case 'tokens':
                     if messages:
